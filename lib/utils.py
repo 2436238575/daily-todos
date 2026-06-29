@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from copy import deepcopy
 from logging.handlers import RotatingFileHandler
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QCoreApplication, Qt
-from PySide6.QtGui import QGuiApplication, QIcon, QPalette
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 
@@ -153,6 +152,40 @@ def apply_theme(app: QGuiApplication, theme: str) -> None:
         logging.getLogger(__name__).exception("Failed to load style sheet")
 
 
+def create_app_icon() -> QIcon:
+    """Create a non-empty application icon for windows and system tray use."""
+
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        margin = max(2, size // 10)
+        radius = max(3, size // 7)
+        rect = pixmap.rect().adjusted(margin, margin, -margin, -margin)
+
+        painter.setBrush(QColor("#2563eb"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(rect, radius, radius)
+
+        painter.setPen(QPen(QColor("#ffffff"), max(2, size // 12), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        x1 = int(size * 0.30)
+        y1 = int(size * 0.52)
+        x2 = int(size * 0.44)
+        y2 = int(size * 0.66)
+        x3 = int(size * 0.72)
+        y3 = int(size * 0.36)
+        painter.drawLine(x1, y1, x2, y2)
+        painter.drawLine(x2, y2, x3, y3)
+        painter.end()
+
+        icon.addPixmap(pixmap)
+    return icon
+
+
 def setup_tray_icon(
     parent,
     show_callback,
@@ -167,6 +200,10 @@ def setup_tray_icon(
     icon = QIcon.fromTheme("view-calendar-tasks")
     if icon.isNull():
         icon = parent.windowIcon()
+    if icon.isNull():
+        icon = create_app_icon()
+    if parent.windowIcon().isNull():
+        parent.setWindowIcon(icon)
     tray.setIcon(icon)
     tray.setToolTip(APP_NAME)
 
@@ -185,7 +222,7 @@ def setup_tray_icon(
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick)
         else None
     )
-    tray.show()
+    tray.setVisible(True)
     return tray
 
 
@@ -274,4 +311,3 @@ def _dark_palette() -> QPalette:
 
 def translate(context: str, text: str) -> str:
     return QCoreApplication.translate(context, text)
-

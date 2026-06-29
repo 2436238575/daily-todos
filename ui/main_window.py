@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import QFile, Qt, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QIcon
+from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from core.scheduler import DailyScheduler
 from core.task_manager import Task, TaskManager
-from lib.utils import APP_NAME, apply_theme, load_settings, setup_tray_icon
+from lib.utils import APP_NAME, apply_theme, setup_tray_icon
 from ui.dialogs.settings_dialog import SettingsDialog
 from ui.dialogs.task_edit_dialog import TaskEditDialog
 

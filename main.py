@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from core.database import Database
 from core.scheduler import DailyScheduler
 from core.task_manager import TaskManager
-from lib.utils import APP_NAME, BASE_DIR, apply_theme, load_settings, setup_logging
+from lib.utils import APP_NAME, BASE_DIR, apply_theme, create_app_icon, load_settings, setup_logging
 from ui.main_window import MainWindow
 
 
@@ -113,6 +113,7 @@ def main() -> int:
 
     app = DailyTodoApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setWindowIcon(create_app_icon())
     app.setQuitOnLastWindowClosed(False)
 
     single_instance = SingleInstance(INSTANCE_KEY)
