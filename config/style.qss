@@ -1,0 +1,29 @@
+QWidget {
+    font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    font-size: 13px;
+}
+
+QMainWindow, QDialog {
+    background: palette(window);
+}
+
+QPushButton {
+    min-height: 28px;
+    padding: 4px 10px;
+}
+
+QListWidget {
+    border: 1px solid palette(mid);
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QListWidget::item {
+    min-height: 32px;
+    padding: 4px;
+}
+
+QLineEdit, QComboBox, QTimeEdit {
+    min-height: 28px;
+    padding: 2px 6px;
+}

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+data/todo.db
+data/todo.db-shm
+data/todo.db-wal
+data/archive/
+logs/app.log
+logs/app.log.*
+config/settings.json
+translations/*.qm
