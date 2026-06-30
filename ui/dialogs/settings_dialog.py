@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QFile, QTime
+from PySide6.QtCore import QFile, QSignalBlocker, QTime, Signal
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -26,10 +26,13 @@ from ui.dialogs.task_edit_dialog import TaskEditDialog
 
 
 class SettingsDialog(QDialog):
+    settings_changed = Signal(dict)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.settings = load_settings()
+        self._loading = False
         self._ui = self._load_ui()
 
         self.theme_combo: QComboBox = self._ui.findChild(QComboBox, "themeComboBox")
@@ -40,6 +43,7 @@ class SettingsDialog(QDialog):
         self.add_button: QPushButton = self._ui.findChild(QPushButton, "addTemplateButton")
         self.edit_button: QPushButton = self._ui.findChild(QPushButton, "editTemplateButton")
         self.remove_button: QPushButton = self._ui.findChild(QPushButton, "removeTemplateButton")
+        self.apply_button: QPushButton = self._ui.findChild(QPushButton, "applyTemplateButton")
         self.button_box: QDialogButtonBox = self._ui.findChild(QDialogButtonBox, "buttonBox")
 
         self._configure_widgets()
@@ -52,9 +56,6 @@ class SettingsDialog(QDialog):
         self.setWindowTitle(self._ui.windowTitle())
         self.resize(self._ui.size())
 
-    def saved_settings(self) -> dict[str, Any]:
-        return self.settings
-
     def _configure_widgets(self) -> None:
         self.theme_combo.addItem(self.tr("跟随系统"), "system")
         self.theme_combo.addItem(self.tr("浅色"), "light")
@@ -62,25 +63,42 @@ class SettingsDialog(QDialog):
         self.language_combo.addItem("简体中文", "zh_CN")
         self.language_combo.addItem("English", "en_US")
         self.template_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.apply_button.setEnabled(False)
 
     def _load_settings_into_ui(self) -> None:
-        self.theme_combo.setCurrentIndex(
-            max(0, self.theme_combo.findData(self.settings.get("theme", "system")))
-        )
-        self.language_combo.setCurrentIndex(
-            max(0, self.language_combo.findData(self.settings.get("language", "zh_CN")))
-        )
-        time = QTime.fromString(str(self.settings.get("reset_time", "03:00")), "HH:mm")
-        self.reset_time_edit.setTime(time if time.isValid() else QTime(3, 0))
-        self.auto_start_check.setChecked(bool(self.settings.get("auto_start", False)))
-        self._reload_template_list(self.settings.get("daily_template", []))
+        self._loading = True
+        try:
+            with (
+                QSignalBlocker(self.theme_combo),
+                QSignalBlocker(self.language_combo),
+                QSignalBlocker(self.reset_time_edit),
+                QSignalBlocker(self.auto_start_check),
+                QSignalBlocker(self.template_list),
+            ):
+                self.theme_combo.setCurrentIndex(
+                    max(0, self.theme_combo.findData(self.settings.get("theme", "system")))
+                )
+                self.language_combo.setCurrentIndex(
+                    max(0, self.language_combo.findData(self.settings.get("language", "zh_CN")))
+                )
+                time = QTime.fromString(str(self.settings.get("reset_time", "03:00")), "HH:mm")
+                self.reset_time_edit.setTime(time if time.isValid() else QTime(3, 0))
+                self.auto_start_check.setChecked(bool(self.settings.get("auto_start", False)))
+                self._reload_template_list(self.settings.get("daily_template", []))
+        finally:
+            self._loading = False
 
     def _connect_signals(self) -> None:
+        self.theme_combo.currentIndexChanged.connect(self._save_general_settings)
+        self.language_combo.currentIndexChanged.connect(self._save_general_settings)
+        self.reset_time_edit.timeChanged.connect(self._save_general_settings)
+        self.auto_start_check.toggled.connect(self._save_general_settings)
         self.add_button.clicked.connect(self._add_template_item)
         self.edit_button.clicked.connect(self._edit_template_item)
         self.remove_button.clicked.connect(self._remove_template_item)
+        self.apply_button.clicked.connect(self._apply_template)
         self.template_list.itemDoubleClicked.connect(lambda _: self._edit_template_item())
-        self.button_box.accepted.connect(self._save_and_accept)
+        self.template_list.model().rowsMoved.connect(lambda *_: self._set_template_dirty(True))
         self.button_box.rejected.connect(self.reject)
 
     def _reload_template_list(self, template: list[dict[str, Any]]) -> None:
@@ -94,6 +112,7 @@ class SettingsDialog(QDialog):
         dialog = TaskEditDialog(parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.template_list.addItem(dialog.content)
+            self._set_template_dirty(True)
 
     def _edit_template_item(self) -> None:
         current = self.template_list.currentItem()
@@ -102,11 +121,13 @@ class SettingsDialog(QDialog):
         dialog = TaskEditDialog(current.text(), self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             current.setText(dialog.content)
+            self._set_template_dirty(True)
 
     def _remove_template_item(self) -> None:
         current_row = self.template_list.currentRow()
         if current_row >= 0:
             self.template_list.takeItem(current_row)
+            self._set_template_dirty(True)
 
     def _collect_template(self) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
@@ -117,7 +138,9 @@ class SettingsDialog(QDialog):
                 result.append({"content": content, "sort_order": index})
         return result
 
-    def _save_and_accept(self) -> None:
+    def _save_general_settings(self) -> None:
+        if self._loading:
+            return
         previous_auto_start = bool(self.settings.get("auto_start", False))
         self.settings.update(
             {
@@ -125,7 +148,6 @@ class SettingsDialog(QDialog):
                 "language": self.language_combo.currentData(),
                 "reset_time": self.reset_time_edit.time().toString("HH:mm"),
                 "auto_start": self.auto_start_check.isChecked(),
-                "daily_template": self._collect_template(),
             }
         )
 
@@ -138,8 +160,23 @@ class SettingsDialog(QDialog):
             QMessageBox.critical(self, self.tr("保存失败"), str(exc))
             return
 
+        self.settings_changed.emit(dict(self.settings))
+
+    def _apply_template(self) -> None:
+        self.settings["daily_template"] = self._collect_template()
+        try:
+            save_settings(self.settings)
+        except Exception as exc:
+            self.logger.exception("Failed to save template")
+            QMessageBox.critical(self, self.tr("保存失败"), str(exc))
+            return
+
+        self._set_template_dirty(False)
+        self.settings_changed.emit(dict(self.settings))
         QMessageBox.information(self, self.tr("提示"), self.tr("母本修改将在下次重置时生效。"))
-        self.accept()
+
+    def _set_template_dirty(self, dirty: bool) -> None:
+        self.apply_button.setEnabled(dirty)
 
     @staticmethod
     def _load_ui():
@@ -151,4 +188,3 @@ class SettingsDialog(QDialog):
             return QUiLoader().load(file)
         finally:
             file.close()
-

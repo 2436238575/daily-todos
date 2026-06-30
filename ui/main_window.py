@@ -6,11 +6,14 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QFile, Qt, Signal
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import QDate, QFile, Qt, Signal
+from PySide6.QtGui import QAction, QCloseEvent, QFont, QTextCharFormat
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtWidgets import (
     QApplication,
+    QCalendarWidget,
+    QDialog,
+    QDialogButtonBox,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -38,6 +41,8 @@ class MainWindow(QMainWindow):
         self.scheduler = scheduler
         self._allow_close = False
         self._refreshing = False
+        self._selected_date = date.today().isoformat()
+        self._available_dates: set[str] = set()
         self.refresh_action: QAction | None = None
         self.tray_icon = None
 
@@ -46,9 +51,12 @@ class MainWindow(QMainWindow):
         self.task_list: QListWidget = self._ui.findChild(QListWidget, "taskListWidget")
         self.add_button: QPushButton = self._ui.findChild(QPushButton, "addTaskButton")
         self.delete_button: QPushButton = self._ui.findChild(QPushButton, "deleteTaskButton")
+        self.select_date_button: QPushButton = self._ui.findChild(QPushButton, "selectDateButton")
+        self.today_button: QPushButton = self._ui.findChild(QPushButton, "todayButton")
         self.settings_button: QPushButton = self._ui.findChild(QPushButton, "settingsButton")
 
         self._install_loaded_ui()
+        self._refresh_available_dates()
         self._configure_task_list()
         self._connect_signals()
         self._create_actions()
@@ -63,15 +71,43 @@ class MainWindow(QMainWindow):
         self.refresh_today_view()
 
     def refresh_today_view(self) -> None:
+        self._select_date(date.today().isoformat())
+
+    def refresh_current_view(self) -> None:
+        self._refresh_available_dates()
+        self._render_selected_date()
+
+    def _select_date(self, date_str: str) -> None:
+        self._refresh_available_dates()
         today = date.today().isoformat()
-        self.date_label.setText(self.tr("{date}").format(date=today))
+        if date_str > today or (date_str != today and date_str not in self._available_dates):
+            return
+        self._selected_date = date_str
+        self._render_selected_date()
+
+    def _render_selected_date(self) -> None:
+        selected_date = self._selected_date
+        is_history = selected_date != date.today().isoformat()
+        self.date_label.setText(
+            self.tr("历史记录：{date}").format(date=selected_date)
+            if is_history
+            else self.tr("今日：{date}").format(date=selected_date)
+        )
+        self.today_button.setVisible(is_history)
+        self.add_button.setEnabled(not is_history)
+        self.delete_button.setEnabled(not is_history)
+        self.task_list.setDragDropMode(
+            QListWidget.DragDropMode.NoDragDrop
+            if is_history
+            else QListWidget.DragDropMode.InternalMove
+        )
         self._refreshing = True
         try:
             self.task_list.clear()
-            for task in self.task_manager.get_tasks_by_date(today):
-                self._add_task_item(task)
+            for task in self.task_manager.get_tasks_by_date(selected_date):
+                self._add_task_item(task, read_only=is_history)
         except Exception as exc:
-            self.logger.exception("Failed to refresh today's tasks")
+            self.logger.exception("Failed to refresh tasks for %s", selected_date)
             QMessageBox.critical(self, self.tr("刷新失败"), str(exc))
         finally:
             self._refreshing = False
@@ -91,6 +127,8 @@ class MainWindow(QMainWindow):
         self.settings_button.setText(self.tr("设置"))
         self.add_button.setText(self.tr("添加任务"))
         self.delete_button.setText(self.tr("删除选中"))
+        self.select_date_button.setText(self.tr("选择日期"))
+        self.today_button.setText(self.tr("回到今日"))
         if self.refresh_action is not None:
             self.refresh_action.setText(self.tr("刷新"))
         if self.tray_icon is not None and self.tray_icon.contextMenu() is not None:
@@ -142,6 +180,8 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self.add_button.clicked.connect(self._add_task)
         self.delete_button.clicked.connect(self._delete_selected_task)
+        self.select_date_button.clicked.connect(self._open_date_picker)
+        self.today_button.clicked.connect(self.refresh_today_view)
         self.settings_button.clicked.connect(self._open_settings)
         self.task_list.itemChanged.connect(self._task_item_changed)
         self.task_list.itemDoubleClicked.connect(self._edit_task)
@@ -152,28 +192,40 @@ class MainWindow(QMainWindow):
     def _create_actions(self) -> None:
         self.refresh_action = QAction(self.tr("刷新"), self)
         self.refresh_action.setShortcut("F5")
-        self.refresh_action.triggered.connect(self.refresh_today_view)
+        self.refresh_action.triggered.connect(self.refresh_current_view)
         self.addAction(self.refresh_action)
 
-    def _add_task_item(self, task: Task) -> None:
+    def _add_task_item(self, task: Task, *, read_only: bool = False) -> None:
         item = QListWidgetItem(task.content)
-        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable)
+        flags = item.flags()
+        if read_only:
+            flags &= ~Qt.ItemFlag.ItemIsEditable
+            flags &= ~Qt.ItemFlag.ItemIsUserCheckable
+            flags &= ~Qt.ItemFlag.ItemIsDragEnabled
+            flags &= ~Qt.ItemFlag.ItemIsDropEnabled
+        else:
+            flags |= Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEditable
+        item.setFlags(flags)
         item.setCheckState(Qt.CheckState.Checked if task.is_completed else Qt.CheckState.Unchecked)
         item.setData(Qt.ItemDataRole.UserRole, task.id)
         self.task_list.addItem(item)
 
     def _add_task(self) -> None:
+        if self._selected_date != date.today().isoformat():
+            return
         dialog = TaskEditDialog(parent=self)
         if dialog.exec() != TaskEditDialog.DialogCode.Accepted:
             return
         try:
-            self.task_manager.add_task(dialog.content, date.today().isoformat())
+            self.task_manager.add_task(dialog.content, self._selected_date)
             self.refresh_today_view()
         except Exception as exc:
             self.logger.exception("Failed to add task")
             QMessageBox.critical(self, self.tr("添加失败"), str(exc))
 
     def _edit_task(self, item: QListWidgetItem) -> None:
+        if self._selected_date != date.today().isoformat():
+            return
         task_id = int(item.data(Qt.ItemDataRole.UserRole))
         dialog = TaskEditDialog(item.text(), self)
         if dialog.exec() != TaskEditDialog.DialogCode.Accepted:
@@ -187,6 +239,8 @@ class MainWindow(QMainWindow):
             self.refresh_today_view()
 
     def _delete_selected_task(self) -> None:
+        if self._selected_date != date.today().isoformat():
+            return
         item = self.task_list.currentItem()
         if item is None:
             return
@@ -204,7 +258,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, self.tr("删除失败"), str(exc))
 
     def _task_item_changed(self, item: QListWidgetItem) -> None:
-        if self._refreshing:
+        if self._refreshing or self._selected_date != date.today().isoformat():
             return
         try:
             self.task_manager.update_task(
@@ -218,7 +272,7 @@ class MainWindow(QMainWindow):
             self.refresh_today_view()
 
     def _persist_task_order(self) -> None:
-        if self._refreshing:
+        if self._refreshing or self._selected_date != date.today().isoformat():
             return
         ids = [
             int(self.task_list.item(index).data(Qt.ItemDataRole.UserRole))
@@ -231,17 +285,21 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self)
-        if dialog.exec() == SettingsDialog.DialogCode.Accepted:
-            app = QApplication.instance()
-            settings = dialog.saved_settings()
-            apply_theme(app, settings.get("theme", "system"))
-            app.update_theme_signal(settings.get("theme", "system"))
-            if app.change_language(settings.get("language", "zh_CN")):
-                self.retranslate_ui()
+        dialog.settings_changed.connect(self._apply_settings)
+        dialog.exec()
+
+    def _apply_settings(self, settings) -> None:
+        app = QApplication.instance()
+        apply_theme(app, settings.get("theme", "system"))
+        app.update_theme_signal(settings.get("theme", "system"))
+        if app.change_language(settings.get("language", "zh_CN")):
+            self.retranslate_ui()
 
     def _on_scheduler_reset(self, date_str: str, inserted: int) -> None:
         if date_str == date.today().isoformat():
-            self.refresh_today_view()
+            self._refresh_available_dates()
+            if self._selected_date == date_str:
+                self._render_selected_date()
         if inserted > 0 and self.tray_icon is not None:
             self.tray_icon.showMessage(
                 "DailyTodo",
@@ -250,6 +308,50 @@ class MainWindow(QMainWindow):
 
     def _on_scheduler_failed(self, message: str) -> None:
         self.logger.error("Scheduler reset failed: %s", message)
+
+    def _open_date_picker(self) -> None:
+        self._refresh_available_dates()
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.tr("选择日期"))
+        layout = QVBoxLayout(dialog)
+
+        calendar = QCalendarWidget(dialog)
+        calendar.setGridVisible(True)
+        calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        calendar.setMaximumDate(QDate.currentDate())
+        calendar.setSelectedDate(QDate.fromString(self._selected_date, "yyyy-MM-dd"))
+        self._mark_available_dates(calendar)
+        layout.addWidget(calendar)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        selected = calendar.selectedDate().toString("yyyy-MM-dd")
+        if selected == date.today().isoformat() or selected in self._available_dates:
+            self._select_date(selected)
+
+    def _refresh_available_dates(self) -> None:
+        try:
+            self._available_dates = self.task_manager.get_available_dates()
+        except Exception:
+            self.logger.exception("Failed to load available task dates")
+            self._available_dates = {date.today().isoformat()}
+
+    def _mark_available_dates(self, calendar: QCalendarWidget) -> None:
+        marked_format = QTextCharFormat()
+        marked_format.setFontWeight(QFont.Weight.Bold)
+        for date_str in self._available_dates:
+            qdate = QDate.fromString(date_str, "yyyy-MM-dd")
+            if qdate.isValid():
+                calendar.setDateTextFormat(qdate, marked_format)
 
     @staticmethod
     def _load_ui():

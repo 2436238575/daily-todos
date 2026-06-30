@@ -132,12 +132,164 @@ class Database:
             (key, value),
         )
 
+    def get_tasks_by_date(self, date_str: str) -> list[sqlite3.Row]:
+        rows = self.fetch_all(
+            """
+            SELECT id, content, target_date, is_completed, sort_order, created_at, updated_at
+            FROM tasks
+            WHERE target_date = ?
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (date_str,),
+        )
+        if rows:
+            return rows
+        return self._get_archived_tasks_by_date(date_str)
+
+    def get_task_dates(self, max_date: str) -> set[str]:
+        rows = self.fetch_all(
+            """
+            SELECT DISTINCT target_date
+            FROM tasks
+            WHERE target_date <= ?
+            """,
+            (max_date,),
+        )
+        dates = {str(row["target_date"]) for row in rows}
+        dates.update(self._get_archived_task_dates(max_date))
+        return dates
+
+    def count_tasks_by_date(self, date_str: str) -> int:
+        row = self.fetch_one(
+            "SELECT COUNT(*) AS count FROM tasks WHERE target_date = ?",
+            (date_str,),
+        )
+        return int(row["count"]) if row else 0
+
+    def insert_tasks(self, values: Sequence[tuple[str, str, int]]) -> None:
+        with self.transaction():
+            self.executemany(
+                """
+                INSERT INTO tasks(content, target_date, sort_order)
+                VALUES(?, ?, ?)
+                """,
+                values,
+            )
+
+    def add_task(self, content: str, target_date: str, sort_order: int | None = None) -> int:
+        if sort_order is None:
+            row = self.fetch_one(
+                "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM tasks WHERE target_date = ?",
+                (target_date,),
+            )
+            sort_order = int(row["next_order"]) if row else 0
+
+        cursor = self.execute(
+            """
+            INSERT INTO tasks(content, target_date, sort_order)
+            VALUES(?, ?, ?)
+            """,
+            (content, target_date, sort_order),
+        )
+        return int(cursor.lastrowid)
+
+    def update_task(
+        self,
+        task_id: int,
+        *,
+        content: str | None = None,
+        is_completed: bool | None = None,
+        sort_order: int | None = None,
+    ) -> bool:
+        fields: list[str] = []
+        values: list[Any] = []
+
+        if content is not None:
+            fields.append("content = ?")
+            values.append(content)
+        if is_completed is not None:
+            fields.append("is_completed = ?")
+            values.append(1 if is_completed else 0)
+        if sort_order is not None:
+            fields.append("sort_order = ?")
+            values.append(sort_order)
+
+        if not fields:
+            return True
+
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(task_id)
+        cursor = self.execute(
+            f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?",
+            tuple(values),
+        )
+        return cursor.rowcount > 0
+
+    def delete_task(self, task_id: int) -> bool:
+        cursor = self.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        return cursor.rowcount > 0
+
+    def reorder_tasks(self, ordered_ids: Sequence[int]) -> None:
+        with self.transaction():
+            for sort_order, task_id in enumerate(ordered_ids):
+                self.execute(
+                    "UPDATE tasks SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (sort_order, task_id),
+                )
+
     def close(self) -> None:
         with self._lock:
             try:
                 self.connection.close()
             except sqlite3.Error:
                 self.logger.exception("Failed to close database connection")
+
+    def _get_archived_tasks_by_date(self, date_str: str) -> list[sqlite3.Row]:
+        archive_path = self.archive_dir / f"todo_{date_str[:7]}.db"
+        if not archive_path.exists():
+            return []
+        return self._fetch_archive_rows(
+            archive_path,
+            """
+            SELECT id, content, target_date, is_completed, sort_order, created_at, updated_at
+            FROM tasks
+            WHERE target_date = ?
+            ORDER BY sort_order ASC, id ASC
+            """,
+            (date_str,),
+        )
+
+    def _get_archived_task_dates(self, max_date: str) -> set[str]:
+        dates: set[str] = set()
+        for archive_path in self.archive_dir.glob("todo_????-??.db"):
+            rows = self._fetch_archive_rows(
+                archive_path,
+                """
+                SELECT DISTINCT target_date
+                FROM tasks
+                WHERE target_date <= ?
+                """,
+                (max_date,),
+            )
+            dates.update(str(row["target_date"]) for row in rows)
+        return dates
+
+    def _fetch_archive_rows(
+        self,
+        archive_path: Path,
+        sql: str,
+        parameters: Sequence[Any],
+    ) -> list[sqlite3.Row]:
+        try:
+            archive = sqlite3.connect(archive_path)
+            archive.row_factory = sqlite3.Row
+            try:
+                return list(archive.execute(sql, parameters).fetchall())
+            finally:
+                archive.close()
+        except sqlite3.Error as exc:
+            self.logger.exception("Failed to read archive database: %s", archive_path)
+            raise DatabaseError("Failed to read archive database") from exc
 
     def _archive_previous_month(self) -> None:
         """Move rows older than the current month into per-month archive DBs."""

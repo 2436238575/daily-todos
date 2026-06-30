@@ -25,6 +25,20 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="selectDateButton">
+        <property name="text">
+         <string>选择日期</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="todayButton">
+        <property name="text">
+         <string>回到今日</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <spacer name="headerSpacer">
         <property name="orientation">
          <enum>Qt::Horizontal</enum>
