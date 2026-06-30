@@ -82,6 +82,18 @@
         <source>母本修改将在下次重置时生效。</source>
         <translation>母本修改将在下次重置时生效。</translation>
     </message>
+    <message>
+        <source>测试失败</source>
+        <translation>测试失败</translation>
+    </message>
+    <message>
+        <source>测试通过</source>
+        <translation>测试通过</translation>
+    </message>
+    <message>
+        <source>SQLite-Sync 已关闭。</source>
+        <translation>SQLite-Sync 已关闭。</translation>
+    </message>
 </context>
 <context>
     <name>TaskEditDialog</name>
@@ -95,4 +107,3 @@
     </message>
 </context>
 </TS>
-

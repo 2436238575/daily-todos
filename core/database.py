@@ -6,13 +6,77 @@ import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, Iterator, Sequence
+from urllib.parse import urlparse
+
+from lib.utils import load_settings
 
 
 class DatabaseError(RuntimeError):
     """Raised when a database operation fails."""
+
+
+@dataclass(frozen=True)
+class SyncTestResult:
+    ok: bool
+    message: str
+
+
+def validate_postgresql_url(url: str) -> SyncTestResult:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"postgresql", "postgres"}:
+        return SyncTestResult(False, "URL must start with postgresql://")
+    if not parsed.hostname:
+        return SyncTestResult(False, "URL must include a host")
+    return SyncTestResult(True, "URL format is valid")
+
+
+def test_postgresql_connection(url: str, *, timeout: int = 5) -> SyncTestResult:
+    validation = validate_postgresql_url(url)
+    if not validation.ok:
+        return validation
+
+    driver = _load_postgresql_driver()
+    if driver is None:
+        return SyncTestResult(False, "PostgreSQL driver is not installed")
+
+    driver_name, module = driver
+    try:
+        if driver_name == "psycopg":
+            with module.connect(url, connect_timeout=timeout) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+        else:
+            connection = module.connect(url, connect_timeout=timeout)
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+            finally:
+                connection.close()
+    except Exception as exc:
+        return SyncTestResult(False, f"PostgreSQL connection failed: {exc}")
+    return SyncTestResult(True, "PostgreSQL connection succeeded")
+
+
+def _load_postgresql_driver():
+    try:
+        import psycopg
+
+        return "psycopg", psycopg
+    except ImportError:
+        pass
+
+    try:
+        import psycopg2
+
+        return "psycopg2", psycopg2
+    except ImportError:
+        return None
 
 
 class Database:
@@ -75,6 +139,7 @@ class Database:
                     """
                 )
             self._archive_previous_month()
+            self._try_optional_sync()
         except sqlite3.Error as exc:
             self.logger.exception("Database initialization failed")
             raise DatabaseError("Database initialization failed") from exc
@@ -243,6 +308,100 @@ class Database:
                 self.connection.close()
             except sqlite3.Error:
                 self.logger.exception("Failed to close database connection")
+
+    def _try_optional_sync(self) -> None:
+        settings = load_settings()
+        if not bool(settings.get("sqlite_sync", False)):
+            return
+
+        postgresql_url = str(settings.get("postgresql_sync_url", "")).strip()
+        if not postgresql_url:
+            self.logger.warning("SQLite-Sync is enabled but PostgreSQL Sync URL is empty")
+            return
+
+        result = self._try_sqlite_sync(postgresql_url)
+        if result.ok:
+            self.logger.info("%s", result.message)
+            return
+        self.logger.warning("SQLite-Sync skipped: %s", result.message)
+
+    def _try_sqlite_sync(self, postgresql_url: str) -> SyncTestResult:
+        validation = validate_postgresql_url(postgresql_url)
+        if not validation.ok:
+            return validation
+
+        driver = _load_postgresql_driver()
+        if driver is None:
+            return SyncTestResult(False, "PostgreSQL driver is not installed")
+
+        rows = self.fetch_all(
+            """
+            SELECT id, content, target_date, is_completed, sort_order, created_at, updated_at
+            FROM tasks
+            ORDER BY target_date ASC, sort_order ASC, id ASC
+            """
+        )
+
+        driver_name, module = driver
+        try:
+            if driver_name == "psycopg":
+                with module.connect(postgresql_url, connect_timeout=5) as connection:
+                    with connection.cursor() as cursor:
+                        self._sync_rows_to_postgresql(cursor, rows)
+            else:
+                connection = module.connect(postgresql_url, connect_timeout=5)
+                try:
+                    with connection.cursor() as cursor:
+                        self._sync_rows_to_postgresql(cursor, rows)
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+                finally:
+                    connection.close()
+        except Exception as exc:
+            return SyncTestResult(False, f"PostgreSQL sync failed: {exc}")
+        return SyncTestResult(True, f"SQLite-Sync uploaded {len(rows)} task row(s)")
+
+    def _sync_rows_to_postgresql(self, cursor, rows: Sequence[sqlite3.Row]) -> None:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY,
+                content TEXT NOT NULL,
+                target_date TEXT NOT NULL,
+                is_completed INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        for row in rows:
+            cursor.execute(
+                """
+                INSERT INTO tasks(
+                    id, content, target_date, is_completed, sort_order, created_at, updated_at
+                )
+                VALUES(%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    target_date = EXCLUDED.target_date,
+                    is_completed = EXCLUDED.is_completed,
+                    sort_order = EXCLUDED.sort_order,
+                    created_at = EXCLUDED.created_at,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (
+                    int(row["id"]),
+                    str(row["content"]),
+                    str(row["target_date"]),
+                    int(row["is_completed"]),
+                    int(row["sort_order"]),
+                    str(row["created_at"]),
+                    str(row["updated_at"]),
+                ),
+            )
 
     def _get_archived_tasks_by_date(self, date_str: str) -> list[sqlite3.Row]:
         archive_path = self.archive_dir / f"todo_{date_str[:7]}.db"

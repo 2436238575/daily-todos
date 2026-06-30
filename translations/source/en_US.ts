@@ -82,6 +82,18 @@
         <source>母本修改将在下次重置时生效。</source>
         <translation>Template changes will take effect at the next reset.</translation>
     </message>
+    <message>
+        <source>测试失败</source>
+        <translation>Test failed</translation>
+    </message>
+    <message>
+        <source>测试通过</source>
+        <translation>Test passed</translation>
+    </message>
+    <message>
+        <source>SQLite-Sync 已关闭。</source>
+        <translation>SQLite-Sync has been disabled.</translation>
+    </message>
 </context>
 <context>
     <name>TaskEditDialog</name>
@@ -95,4 +107,3 @@
     </message>
 </context>
 </TS>
-

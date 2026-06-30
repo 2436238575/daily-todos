@@ -1,4 +1,5 @@
 PySide6>=6.5
+psycopg[binary]>=3.1
 Nuitka==4.0
 ordered-set>=4.1.0
 zstandard>=0.22.0

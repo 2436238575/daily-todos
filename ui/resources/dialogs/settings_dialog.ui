@@ -64,6 +64,45 @@
        </property>
       </widget>
      </item>
+     <item row="4" column="0">
+      <widget class="QLabel" name="sqliteSyncLabel">
+       <property name="text">
+        <string>SQLite-Sync</string>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="1">
+      <widget class="QCheckBox" name="sqliteSyncCheckBox">
+       <property name="text">
+        <string>启用</string>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="0">
+      <widget class="QLabel" name="postgresqlSyncUrlLabel">
+       <property name="text">
+        <string>PostgreSQL Sync URL</string>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="1">
+      <layout class="QHBoxLayout" name="postgresqlSyncUrlLayout">
+       <item>
+        <widget class="QLineEdit" name="postgresqlSyncUrlLineEdit">
+         <property name="placeholderText">
+          <string>postgresql://[user[:password]@][host][:port][/database]</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="testPostgresqlSyncButton">
+         <property name="text">
+          <string>测试</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
     </layout>
    </item>
    <item>

@@ -28,6 +28,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "auto_start": False,
     "theme": "system",
     "language": "zh_CN",
+    "sqlite_sync": False,
+    "postgresql_sync_url": "",
     "daily_template": [
         {"content": "晨会复盘", "sort_order": 0},
         {"content": "核心功能开发", "sort_order": 1},

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from core.database import test_postgresql_connection, validate_postgresql_url
 from lib.utils import load_settings, save_settings, set_auto_start
 from ui.dialogs.task_edit_dialog import TaskEditDialog
 
@@ -39,6 +41,9 @@ class SettingsDialog(QDialog):
         self.language_combo: QComboBox = self._ui.findChild(QComboBox, "languageComboBox")
         self.reset_time_edit: QTimeEdit = self._ui.findChild(QTimeEdit, "resetTimeEdit")
         self.auto_start_check: QCheckBox = self._ui.findChild(QCheckBox, "autoStartCheckBox")
+        self.sqlite_sync_check: QCheckBox = self._ui.findChild(QCheckBox, "sqliteSyncCheckBox")
+        self.postgresql_sync_url_edit: QLineEdit = self._ui.findChild(QLineEdit, "postgresqlSyncUrlLineEdit")
+        self.test_sync_button: QPushButton = self._ui.findChild(QPushButton, "testPostgresqlSyncButton")
         self.template_list: QListWidget = self._ui.findChild(QListWidget, "templateListWidget")
         self.add_button: QPushButton = self._ui.findChild(QPushButton, "addTemplateButton")
         self.edit_button: QPushButton = self._ui.findChild(QPushButton, "editTemplateButton")
@@ -73,6 +78,8 @@ class SettingsDialog(QDialog):
                 QSignalBlocker(self.language_combo),
                 QSignalBlocker(self.reset_time_edit),
                 QSignalBlocker(self.auto_start_check),
+                QSignalBlocker(self.sqlite_sync_check),
+                QSignalBlocker(self.postgresql_sync_url_edit),
                 QSignalBlocker(self.template_list),
             ):
                 self.theme_combo.setCurrentIndex(
@@ -84,6 +91,8 @@ class SettingsDialog(QDialog):
                 time = QTime.fromString(str(self.settings.get("reset_time", "03:00")), "HH:mm")
                 self.reset_time_edit.setTime(time if time.isValid() else QTime(3, 0))
                 self.auto_start_check.setChecked(bool(self.settings.get("auto_start", False)))
+                self.sqlite_sync_check.setChecked(bool(self.settings.get("sqlite_sync", False)))
+                self.postgresql_sync_url_edit.setText(str(self.settings.get("postgresql_sync_url", "")))
                 self._reload_template_list(self.settings.get("daily_template", []))
         finally:
             self._loading = False
@@ -93,6 +102,9 @@ class SettingsDialog(QDialog):
         self.language_combo.currentIndexChanged.connect(self._save_general_settings)
         self.reset_time_edit.timeChanged.connect(self._save_general_settings)
         self.auto_start_check.toggled.connect(self._save_general_settings)
+        self.sqlite_sync_check.toggled.connect(self._sync_settings_changed)
+        self.postgresql_sync_url_edit.textChanged.connect(self._sync_settings_changed)
+        self.test_sync_button.clicked.connect(self._test_and_save_sync_settings)
         self.add_button.clicked.connect(self._add_template_item)
         self.edit_button.clicked.connect(self._edit_template_item)
         self.remove_button.clicked.connect(self._remove_template_item)
@@ -161,6 +173,59 @@ class SettingsDialog(QDialog):
             return
 
         self.settings_changed.emit(dict(self.settings))
+
+    def _sync_settings_changed(self) -> None:
+        if self._loading:
+            return
+        saved_enabled = bool(self.settings.get("sqlite_sync", False))
+        saved_url = str(self.settings.get("postgresql_sync_url", ""))
+        current_enabled = self.sqlite_sync_check.isChecked()
+        current_url = self.postgresql_sync_url_edit.text().strip()
+        if current_enabled == saved_enabled and current_url == saved_url:
+            return
+        self.test_sync_button.setEnabled(True)
+
+    def _test_and_save_sync_settings(self) -> None:
+        enabled = self.sqlite_sync_check.isChecked()
+        url = self.postgresql_sync_url_edit.text().strip()
+
+        if not enabled:
+            self.settings.update({"sqlite_sync": False, "postgresql_sync_url": ""})
+            try:
+                save_settings(self.settings)
+            except Exception as exc:
+                self.logger.exception("Failed to save sync settings")
+                QMessageBox.critical(self, self.tr("保存失败"), str(exc))
+                return
+            self.settings_changed.emit(dict(self.settings))
+            QMessageBox.information(self, self.tr("提示"), self.tr("SQLite-Sync 已关闭。"))
+            return
+
+        validation = validate_postgresql_url(url)
+        if not validation.ok:
+            QMessageBox.warning(self, self.tr("测试失败"), validation.message)
+            return
+
+        self.test_sync_button.setEnabled(False)
+        try:
+            result = test_postgresql_connection(url)
+        finally:
+            self.test_sync_button.setEnabled(True)
+
+        if not result.ok:
+            QMessageBox.warning(self, self.tr("测试失败"), result.message)
+            return
+
+        self.settings.update({"sqlite_sync": True, "postgresql_sync_url": url})
+        try:
+            save_settings(self.settings)
+        except Exception as exc:
+            self.logger.exception("Failed to save sync settings")
+            QMessageBox.critical(self, self.tr("保存失败"), str(exc))
+            return
+
+        self.settings_changed.emit(dict(self.settings))
+        QMessageBox.information(self, self.tr("测试通过"), result.message)
 
     def _apply_template(self) -> None:
         self.settings["daily_template"] = self._collect_template()
