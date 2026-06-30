@@ -101,6 +101,20 @@ DailyTodo/
 ]
 ```
 
+## 构建打包
+
+构建脚本支持传入版本号和构建类型：
+
+```bat
+build_windows.bat 1.2.3 release
+```
+
+```sh
+./build_linux.sh 1.2.3 dev
+```
+
+构建类型可选 `dev` 或 `release`，不传时默认 `dev`。Windows `release` 包会关闭终端窗口，输出包名包含版本号和构建类型，例如 `DailyTodo-1.2.3-release-windows.zip`。
+
 ## 开发路线
 
 - 基础 CRUD 与今日视图

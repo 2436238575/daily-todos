@@ -4,8 +4,8 @@
 <context>
     <name>MainWindow</name>
     <message>
-        <source>今日任务：{date}</source>
-        <translation>Today's tasks: {date}</translation>
+        <source>{date}</source>
+        <translation>{date}</translation>
     </message>
     <message>
         <source>刷新失败</source>

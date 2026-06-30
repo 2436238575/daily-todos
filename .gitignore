@@ -1,11 +1,64 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
 .venv/
+python-env/
+
+# Packaging / build
+build/
+deployment/
+dist/
+*.egg-info/
+*.egg
+*.whl
+*.manifest
+*.spec
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+*.manifest
+*.spec
+build/
+dist/
+
+# PySide / Qt Designer generated
+*.qmlc
+*.rcc
+*.qrc
+*.qrc.py
+*.ui.py
+*.pyc
+
+# Local database and logs
 data/todo.db
 data/todo.db-shm
 data/todo.db-wal
 data/archive/
 logs/app.log
 logs/app.log.*
+
+# User-specific config
 config/settings.json
+.vscode/
+.idea/
+
+# Translations
 translations/*.qm
+
+# Deployment artifacts
+DailyTodo.dist/
+
+# Temporary files
+logs/
+*.swp
+*~
+*.tmp
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

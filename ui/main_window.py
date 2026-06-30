@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
 
     def refresh_today_view(self) -> None:
         today = date.today().isoformat()
-        self.date_label.setText(self.tr("今日任务：{date}").format(date=today))
+        self.date_label.setText(self.tr("{date}").format(date=today))
         self._refreshing = True
         try:
             self.task_list.clear()
