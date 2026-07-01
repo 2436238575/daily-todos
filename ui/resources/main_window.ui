@@ -63,24 +63,6 @@
     <item>
      <widget class="QListWidget" name="taskListWidget"/>
     </item>
-    <item>
-     <layout class="QHBoxLayout" name="footerLayout">
-      <item>
-       <widget class="QPushButton" name="addTaskButton">
-        <property name="text">
-         <string>添加任务</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="deleteTaskButton">
-        <property name="text">
-         <string>删除选中</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </item>
    </layout>
   </widget>
  </widget>

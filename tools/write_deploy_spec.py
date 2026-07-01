@@ -51,6 +51,7 @@ def main() -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    buildozer_mode = "release" if args.build_type == "release" else "debug"
     python_path = Path(sys.executable).resolve()
     icon_path = (
         python_path.parent.parent
@@ -112,7 +113,7 @@ mode = standalone
 extra_args = {extra_args}
 
 [buildozer]
-mode = debug
+mode = {buildozer_mode}
 recipe_dir =
 jars_dir =
 ndk_path =

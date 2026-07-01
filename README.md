@@ -19,9 +19,9 @@
 ## 技术栈
 
 - 语言：Python 3.10+
-- GUI框架：PySide6 (Qt for Python)
-- 数据库：SQLite (内置 sqlite3 模块)
-- 定时机制：QThread 后台轮询 + 启动时一次性补偿检查
+- GUI 框架：PySide6 (Qt for Python)
+- 数据库：SQLite（内置 `sqlite3` 模块）
+- 定时机制：`QThread` 后台轮询 + 启动时一次性补偿检查
 - 样式管理：QSS 变量化配置，响应系统主题信号
 
 ## 项目结构
@@ -29,15 +29,17 @@
 ```text
 DailyTodo/
 ├── main.py                         # 应用入口（单例检查、全局异常捕获、初始化）
-├── requirements.txt                # 依赖清单（仅 PySide6）
+├── requirements.txt                # 依赖清单
 ├── README.md
 ├── .gitignore
+├── build_windows.bat               # Windows 构建脚本
+├── build_linux.sh                  # Linux 构建脚本
 │
 ├── core/                           # 业务核心层
 │   ├── __init__.py
 │   ├── database.py                 # SQLite 连接、表结构初始化、月度归档执行器
-│   ├── task_manager.py             # 任务 CRUD、按日期查询、母本批量插入
-│   └── scheduler.py                # 定时调度器（含启动补偿检查与每日轮询）
+│   ├── scheduler.py                # 定时调度器（含启动补偿检查与每日轮询）
+│   └── task_manager.py             # 任务 CRUD、按日期查询、母本批量插入
 │
 ├── lib/                            # 工具与封装层
 │   ├── __init__.py
@@ -69,10 +71,14 @@ DailyTodo/
 │
 ├── data/                           # 数据存储
 │   ├── todo.db                     # 当前活跃数据库
-│   └── archive/                    # 月度归档库 (todo_2026-06.db)
+│   └── archive/                    # 月度归档库
 │
 ├── logs/                           # 日志
 │   └── app.log
+│
+├── tools/                          # 开发与打包辅助脚本
+│   ├── build_translations.py
+│   └── write_deploy_spec.py
 │
 └── translations/                   # 多语言
     ├── zh_CN.qm
@@ -93,6 +99,7 @@ DailyTodo/
 | `daily_template` | array | 日常任务母本，每项包含 `content` 和 `sort_order` |
 
 `daily_template` 示例：
+
 ```json
 [
     { "content": "晨会复盘", "sort_order": 0 },
@@ -101,28 +108,18 @@ DailyTodo/
 ]
 ```
 
-## 构建打包
+## 构建与打包
 
-构建脚本支持传入版本号和构建类型：
 
-```bat
-build_windows.bat 1.2.3 release
-```
+构建类型可选 `dev` 或 `release`，不传时默认 `dev`。
 
-```sh
-./build_linux.sh 1.2.3 dev
-```
+Windows/Linux 构建流程会自动：
 
-构建类型可选 `dev` 或 `release`，不传时默认 `dev`。Windows `release` 包会关闭终端窗口，输出包名包含版本号和构建类型，例如 `DailyTodo-1.2.3-release-windows.zip`。
-
-## 开发路线
-
-- 基础 CRUD 与今日视图
-- 定时调度与启动补偿填充
-- 月度自动归档
-- 系统托盘与开机自启
-- 主题跟随与多语言切换
-- 任务拖拽排序
+- 创建并激活虚拟环境（如果不存在）
+- 安装依赖
+- 编译翻译文件
+- 生成 `pyside6-deploy` 打包规范
+- 构建并生成平台包
 
 ## 许可证
 

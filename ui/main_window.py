@@ -6,8 +6,8 @@ import logging
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QFile, Qt, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QFont, QTextCharFormat
+from PySide6.QtCore import QDate, QEvent, QFile, QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QBrush, QCloseEvent, QColor, QFont, QPalette, QTextCharFormat
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtWidgets import (
     QApplication,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -41,6 +42,7 @@ class MainWindow(QMainWindow):
         self.scheduler = scheduler
         self._allow_close = False
         self._refreshing = False
+        self._right_button_drag_disabled = False
         self._selected_date = date.today().isoformat()
         self._available_dates: set[str] = set()
         self.refresh_action: QAction | None = None
@@ -49,8 +51,6 @@ class MainWindow(QMainWindow):
         self._ui = self._load_ui()
         self.date_label: QLabel = self._ui.findChild(QLabel, "dateLabel")
         self.task_list: QListWidget = self._ui.findChild(QListWidget, "taskListWidget")
-        self.add_button: QPushButton = self._ui.findChild(QPushButton, "addTaskButton")
-        self.delete_button: QPushButton = self._ui.findChild(QPushButton, "deleteTaskButton")
         self.select_date_button: QPushButton = self._ui.findChild(QPushButton, "selectDateButton")
         self.today_button: QPushButton = self._ui.findChild(QPushButton, "todayButton")
         self.settings_button: QPushButton = self._ui.findChild(QPushButton, "settingsButton")
@@ -94,17 +94,15 @@ class MainWindow(QMainWindow):
             else self.tr("今日：{date}").format(date=selected_date)
         )
         self.today_button.setVisible(is_history)
-        self.add_button.setEnabled(not is_history)
-        self.delete_button.setEnabled(not is_history)
-        self.task_list.setDragDropMode(
-            QListWidget.DragDropMode.NoDragDrop
-            if is_history
-            else QListWidget.DragDropMode.InternalMove
-        )
+        self._sync_task_drag_mode()
         self._refreshing = True
         try:
             self.task_list.clear()
-            for task in self.task_manager.get_tasks_by_date(selected_date):
+            tasks = sorted(
+                self.task_manager.get_tasks_by_date(selected_date),
+                key=lambda task: (task.is_completed, task.sort_order, task.id),
+            )
+            for task in tasks:
                 self._add_task_item(task, read_only=is_history)
         except Exception as exc:
             self.logger.exception("Failed to refresh tasks for %s", selected_date)
@@ -113,6 +111,7 @@ class MainWindow(QMainWindow):
             self._refreshing = False
 
     def show_from_tray(self) -> None:
+        self.refresh_today_view()
         self.showNormal()
         self.raise_()
         self.activateWindow()
@@ -125,8 +124,6 @@ class MainWindow(QMainWindow):
     def retranslate_ui(self) -> None:
         self.setWindowTitle(APP_NAME)
         self.settings_button.setText(self.tr("设置"))
-        self.add_button.setText(self.tr("添加任务"))
-        self.delete_button.setText(self.tr("删除选中"))
         self.select_date_button.setText(self.tr("选择日期"))
         self.today_button.setText(self.tr("回到今日"))
         if self.refresh_action is not None:
@@ -176,13 +173,14 @@ class MainWindow(QMainWindow):
         self.task_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.task_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.task_list.setAlternatingRowColors(True)
+        self.task_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.task_list.viewport().installEventFilter(self)
 
     def _connect_signals(self) -> None:
-        self.add_button.clicked.connect(self._add_task)
-        self.delete_button.clicked.connect(self._delete_selected_task)
         self.select_date_button.clicked.connect(self._open_date_picker)
         self.today_button.clicked.connect(self.refresh_today_view)
         self.settings_button.clicked.connect(self._open_settings)
+        self.task_list.customContextMenuRequested.connect(self._open_task_context_menu)
         self.task_list.itemChanged.connect(self._task_item_changed)
         self.task_list.itemDoubleClicked.connect(self._edit_task)
         self.task_list.model().rowsMoved.connect(lambda *_: self._persist_task_order())
@@ -194,6 +192,31 @@ class MainWindow(QMainWindow):
         self.refresh_action.setShortcut("F5")
         self.refresh_action.triggered.connect(self.refresh_current_view)
         self.addAction(self.refresh_action)
+
+    def _open_task_context_menu(self, position: QPoint) -> None:
+        item = self.task_list.itemAt(position)
+        if item is not None:
+            self.task_list.setCurrentItem(item)
+
+        is_today = self._selected_date == date.today().isoformat()
+        menu = QMenu(self.task_list)
+
+        menu.addSeparator()
+        refresh_action = menu.addAction(self.tr("刷新"))
+
+        add_action = menu.addAction(self.tr("添加"))
+        add_action.setEnabled(is_today)
+
+        delete_action = menu.addAction(self.tr("删除"))
+        delete_action.setEnabled(is_today and self.task_list.currentItem() is not None)
+
+        selected_action = menu.exec(self.task_list.viewport().mapToGlobal(position))
+        if selected_action == refresh_action:
+            self.refresh_current_view()
+        elif selected_action == add_action:
+            self._add_task()
+        elif selected_action == delete_action:
+            self._delete_selected_task()
 
     def _add_task_item(self, task: Task, *, read_only: bool = False) -> None:
         item = QListWidgetItem(task.content)
@@ -208,6 +231,7 @@ class MainWindow(QMainWindow):
         item.setFlags(flags)
         item.setCheckState(Qt.CheckState.Checked if task.is_completed else Qt.CheckState.Unchecked)
         item.setData(Qt.ItemDataRole.UserRole, task.id)
+        self._apply_task_item_style(item)
         self.task_list.addItem(item)
 
     def _add_task(self) -> None:
@@ -260,12 +284,16 @@ class MainWindow(QMainWindow):
     def _task_item_changed(self, item: QListWidgetItem) -> None:
         if self._refreshing or self._selected_date != date.today().isoformat():
             return
+        task_id = int(item.data(Qt.ItemDataRole.UserRole))
+        content = item.text()
+        is_completed = item.checkState() == Qt.CheckState.Checked
         try:
             self.task_manager.update_task(
-                int(item.data(Qt.ItemDataRole.UserRole)),
-                content=item.text(),
-                is_completed=item.checkState() == Qt.CheckState.Checked,
+                task_id,
+                content=content,
+                is_completed=is_completed,
             )
+            QTimer.singleShot(0, self._render_selected_date)
         except Exception as exc:
             self.logger.exception("Failed to update task item")
             QMessageBox.critical(self, self.tr("更新失败"), str(exc))
@@ -283,6 +311,42 @@ class MainWindow(QMainWindow):
         except Exception:
             self.logger.exception("Failed to persist task order")
 
+    def eventFilter(self, watched: QWidget, event: QEvent) -> bool:
+        if watched == self.task_list.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.RightButton:
+                self._right_button_drag_disabled = True
+                self._sync_task_drag_mode()
+            elif event.type() == QEvent.Type.MouseMove and event.buttons() & Qt.MouseButton.RightButton:
+                self._right_button_drag_disabled = True
+                self._sync_task_drag_mode()
+            elif event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.RightButton:
+                self._right_button_drag_disabled = False
+                self._sync_task_drag_mode()
+        return super().eventFilter(watched, event)
+
+    def _sync_task_drag_mode(self) -> None:
+        can_drag = (
+            self._selected_date == date.today().isoformat()
+            and not self._right_button_drag_disabled
+        )
+        self.task_list.setDragDropMode(
+            QListWidget.DragDropMode.InternalMove
+            if can_drag
+            else QListWidget.DragDropMode.NoDragDrop
+        )
+
+    @staticmethod
+    def _apply_task_item_style(item: QListWidgetItem) -> None:
+        is_completed = item.checkState() == Qt.CheckState.Checked
+        font = item.font()
+        font.setStrikeOut(is_completed)
+        item.setFont(font)
+        item.setForeground(
+            QBrush(QColor("#8a8a8a"))
+            if is_completed
+            else QApplication.palette().brush(QPalette.ColorRole.Text)
+        )
+
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self)
         dialog.settings_changed.connect(self._apply_settings)
@@ -298,8 +362,7 @@ class MainWindow(QMainWindow):
     def _on_scheduler_reset(self, date_str: str, inserted: int) -> None:
         if date_str == date.today().isoformat():
             self._refresh_available_dates()
-            if self._selected_date == date_str:
-                self._render_selected_date()
+            self._select_date(date_str)
         if inserted > 0 and self.tray_icon is not None:
             self.tray_icon.showMessage(
                 "DailyTodo",

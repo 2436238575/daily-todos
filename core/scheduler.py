@@ -57,6 +57,7 @@ class DailyScheduler(QThread):
             count = self.task_manager.count_tasks_by_date(date_str)
             if count > 0:
                 self.logger.debug("Tasks already exist for %s; skip reset fill", date_str)
+                self.reset_finished.emit(date_str, 0)
                 return
 
             settings = load_settings()
