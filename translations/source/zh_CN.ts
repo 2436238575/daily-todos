@@ -55,6 +55,10 @@
         <source>刷新</source>
         <translation>刷新</translation>
     </message>
+    <message>
+        <source>同步完成，发现 {count} 个冲突。</source>
+        <translation>同步完成，发现 {count} 个冲突。</translation>
+    </message>
 </context>
 <context>
     <name>SettingsDialog</name>
@@ -83,16 +87,91 @@
         <translation>母本修改将在下次重置时生效。</translation>
     </message>
     <message>
-        <source>测试失败</source>
-        <translation>测试失败</translation>
+        <source>登录失败</source>
+        <translation>登录失败</translation>
     </message>
     <message>
-        <source>测试通过</source>
-        <translation>测试通过</translation>
+        <source>退出失败</source>
+        <translation>退出失败</translation>
     </message>
     <message>
-        <source>SQLite-Sync 已关闭。</source>
-        <translation>SQLite-Sync 已关闭。</translation>
+        <source>同步失败</source>
+        <translation>同步失败</translation>
+    </message>
+    <message>
+        <source>同步完成</source>
+        <translation>同步完成</translation>
+    </message>
+    <message>
+        <source>同步冲突</source>
+        <translation>同步冲突</translation>
+    </message>
+    <message>
+        <source>当前没有待处理冲突。</source>
+        <translation>当前没有待处理冲突。</translation>
+    </message>
+    <message>
+        <source>冲突处理失败</source>
+        <translation>冲突处理失败</translation>
+    </message>
+    <message>
+        <source>首次同步</source>
+        <translation>首次同步</translation>
+    </message>
+    <message>
+        <source>请选择首次同步方式。</source>
+        <translation>请选择首次同步方式。</translation>
+    </message>
+    <message>
+        <source>上传本机</source>
+        <translation>上传本机</translation>
+    </message>
+    <message>
+        <source>下载云端</source>
+        <translation>下载云端</translation>
+    </message>
+    <message>
+        <source>合并两边</source>
+        <translation>合并两边</translation>
+    </message>
+    <message>
+        <source>未登录</source>
+        <translation>未登录</translation>
+    </message>
+    <message>
+        <source>已登录，上次同步：{time}</source>
+        <translation>已登录，上次同步：{time}</translation>
+    </message>
+    <message>
+        <source>已登录</source>
+        <translation>已登录</translation>
+    </message>
+    <message>
+        <source>已登录，尚未首次同步</source>
+        <translation>已登录，尚未首次同步</translation>
+    </message>
+</context>
+<context>
+    <name>ConflictDialog</name>
+    <message>
+        <source>同步冲突</source>
+        <translation>同步冲突</translation>
+    </message>
+    <message>
+        <source>本地版本</source>
+        <translation>本地版本</translation>
+    </message>
+    <message>
+        <source>服务端版本</source>
+        <translation>服务端版本</translation>
+    </message>
+    <message>
+        <source>使用本地版本</source>
+        <translation>使用本地版本</translation>
+    </message>
+    <message>
+        <source>使用服务端版本</source>
+        <translation>使用服务端版本</translation>
     </message>
 </context>
 <context>

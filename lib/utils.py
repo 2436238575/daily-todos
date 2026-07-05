@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import uuid
 from copy import deepcopy
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -28,14 +29,21 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "auto_start": False,
     "theme": "system",
     "language": "zh_CN",
-    "sqlite_sync": False,
-    "postgresql_sync_url": "",
+    "sync": {
+        "server_url": "",
+        "username": "",
+        "refresh_token": "",
+        "last_server_version": 0,
+        "initialized": False,
+        "last_sync_at": "",
+    },
     "daily_template": [
         {"content": "晨会复盘", "sort_order": 0},
         {"content": "核心功能开发", "sort_order": 1},
         {"content": "代码审查", "sort_order": 2},
     ],
 }
+DEPRECATED_SETTINGS_KEYS = {"sqlite_sync", "postgresql_sync_url"}
 
 DEFAULT_QSS = """
 QWidget {
@@ -123,6 +131,9 @@ def load_settings() -> dict[str, Any]:
 
     settings = deepcopy(DEFAULT_SETTINGS)
     settings.update(loaded)
+    for key in DEPRECATED_SETTINGS_KEYS:
+        settings.pop(key, None)
+    settings["sync"] = _normalize_sync_settings(settings.get("sync", {}))
     settings["daily_template"] = _normalize_template(settings.get("daily_template", []))
     save_settings(settings)
     return settings
@@ -132,6 +143,9 @@ def save_settings(settings: dict[str, Any]) -> None:
     ensure_runtime_dirs()
     merged = deepcopy(DEFAULT_SETTINGS)
     merged.update(settings)
+    for key in DEPRECATED_SETTINGS_KEYS:
+        merged.pop(key, None)
+    merged["sync"] = _normalize_sync_settings(merged.get("sync", {}))
     merged["daily_template"] = _normalize_template(merged.get("daily_template", []))
     SETTINGS_PATH.write_text(
         json.dumps(merged, ensure_ascii=False, indent=4),
@@ -287,14 +301,35 @@ def _normalize_template(template: Any) -> list[dict[str, Any]]:
             continue
         normalized.append(
             {
+                "uid": str(item.get("uid") or uuid.uuid4()),
                 "content": content,
                 "sort_order": int(item.get("sort_order", index)),
+                "base_version": int(item.get("base_version", 0)),
+                "deleted": bool(item.get("deleted", False)),
+                "sync_dirty": bool(item.get("sync_dirty", True)),
             }
         )
     normalized.sort(key=lambda item: int(item["sort_order"]))
-    for index, item in enumerate(normalized):
-        item["sort_order"] = index
+    visible_index = 0
+    for item in normalized:
+        if bool(item.get("deleted", False)):
+            continue
+        item["sort_order"] = visible_index
+        visible_index += 1
     return normalized
+
+
+def _normalize_sync_settings(sync: Any) -> dict[str, Any]:
+    defaults = deepcopy(DEFAULT_SETTINGS["sync"])
+    if isinstance(sync, dict):
+        defaults.update(sync)
+    defaults["server_url"] = str(defaults.get("server_url", "")).strip()
+    defaults["username"] = str(defaults.get("username", "")).strip()
+    defaults["refresh_token"] = str(defaults.get("refresh_token", ""))
+    defaults["last_server_version"] = int(defaults.get("last_server_version", 0) or 0)
+    defaults["initialized"] = bool(defaults.get("initialized", False))
+    defaults["last_sync_at"] = str(defaults.get("last_sync_at", ""))
+    return defaults
 
 
 def _dark_palette() -> QPalette:

@@ -26,8 +26,9 @@ from PySide6.QtWidgets import (
 )
 
 from core.scheduler import DailyScheduler
+from core.sync_manager import SyncManager, sync_error_message
 from core.task_manager import Task, TaskManager
-from lib.utils import APP_NAME, apply_theme, setup_tray_icon
+from lib.utils import APP_NAME, apply_theme, load_settings, setup_tray_icon
 from ui.dialogs.settings_dialog import SettingsDialog
 from ui.dialogs.task_edit_dialog import TaskEditDialog
 
@@ -35,11 +36,18 @@ from ui.dialogs.task_edit_dialog import TaskEditDialog
 class MainWindow(QMainWindow):
     quit_requested = Signal()
 
-    def __init__(self, task_manager: TaskManager, scheduler: DailyScheduler, parent=None) -> None:
+    def __init__(
+        self,
+        task_manager: TaskManager,
+        scheduler: DailyScheduler,
+        sync_manager: SyncManager | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.task_manager = task_manager
         self.scheduler = scheduler
+        self.sync_manager = sync_manager
         self._allow_close = False
         self._refreshing = False
         self._right_button_drag_disabled = False
@@ -69,6 +77,7 @@ class MainWindow(QMainWindow):
             self.show_today_overview,
         )
         self.refresh_today_view()
+        QTimer.singleShot(1500, self._attempt_startup_sync)
 
     def refresh_today_view(self) -> None:
         self._select_date(date.today().isoformat())
@@ -348,9 +357,10 @@ class MainWindow(QMainWindow):
         )
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(self)
+        dialog = SettingsDialog(self, sync_manager=self.sync_manager)
         dialog.settings_changed.connect(self._apply_settings)
         dialog.exec()
+        self.refresh_current_view()
 
     def _apply_settings(self, settings) -> None:
         app = QApplication.instance()
@@ -371,6 +381,23 @@ class MainWindow(QMainWindow):
 
     def _on_scheduler_failed(self, message: str) -> None:
         self.logger.error("Scheduler reset failed: %s", message)
+
+    def _attempt_startup_sync(self) -> None:
+        if self.sync_manager is None:
+            return
+        sync = load_settings().get("sync", {})
+        if not sync.get("refresh_token") or not sync.get("initialized"):
+            return
+        try:
+            result = self.sync_manager.sync("normal")
+            self.refresh_current_view()
+            if result.conflicts and self.tray_icon is not None:
+                self.tray_icon.showMessage(
+                    "DailyTodo",
+                    self.tr("同步完成，发现 {count} 个冲突。").format(count=len(result.conflicts)),
+                )
+        except Exception as exc:
+            self.logger.info("Startup sync skipped or failed: %s", sync_error_message(exc))
 
     def _open_date_picker(self) -> None:
         self._refresh_available_dates()

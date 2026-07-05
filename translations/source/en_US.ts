@@ -55,6 +55,10 @@
         <source>刷新</source>
         <translation>Refresh</translation>
     </message>
+    <message>
+        <source>同步完成，发现 {count} 个冲突。</source>
+        <translation>Sync completed with {count} conflict(s).</translation>
+    </message>
 </context>
 <context>
     <name>SettingsDialog</name>
@@ -83,16 +87,91 @@
         <translation>Template changes will take effect at the next reset.</translation>
     </message>
     <message>
-        <source>测试失败</source>
-        <translation>Test failed</translation>
+        <source>登录失败</source>
+        <translation>Login failed</translation>
     </message>
     <message>
-        <source>测试通过</source>
-        <translation>Test passed</translation>
+        <source>退出失败</source>
+        <translation>Logout failed</translation>
     </message>
     <message>
-        <source>SQLite-Sync 已关闭。</source>
-        <translation>SQLite-Sync has been disabled.</translation>
+        <source>同步失败</source>
+        <translation>Sync failed</translation>
+    </message>
+    <message>
+        <source>同步完成</source>
+        <translation>Sync completed</translation>
+    </message>
+    <message>
+        <source>同步冲突</source>
+        <translation>Sync conflicts</translation>
+    </message>
+    <message>
+        <source>当前没有待处理冲突。</source>
+        <translation>There are no pending conflicts.</translation>
+    </message>
+    <message>
+        <source>冲突处理失败</source>
+        <translation>Conflict resolution failed</translation>
+    </message>
+    <message>
+        <source>首次同步</source>
+        <translation>First sync</translation>
+    </message>
+    <message>
+        <source>请选择首次同步方式。</source>
+        <translation>Choose how to run the first sync.</translation>
+    </message>
+    <message>
+        <source>上传本机</source>
+        <translation>Upload this device</translation>
+    </message>
+    <message>
+        <source>下载云端</source>
+        <translation>Download cloud</translation>
+    </message>
+    <message>
+        <source>合并两边</source>
+        <translation>Merge both sides</translation>
+    </message>
+    <message>
+        <source>未登录</source>
+        <translation>Not logged in</translation>
+    </message>
+    <message>
+        <source>已登录，上次同步：{time}</source>
+        <translation>Logged in, last synced: {time}</translation>
+    </message>
+    <message>
+        <source>已登录</source>
+        <translation>Logged in</translation>
+    </message>
+    <message>
+        <source>已登录，尚未首次同步</source>
+        <translation>Logged in, first sync not run</translation>
+    </message>
+</context>
+<context>
+    <name>ConflictDialog</name>
+    <message>
+        <source>同步冲突</source>
+        <translation>Sync conflicts</translation>
+    </message>
+    <message>
+        <source>本地版本</source>
+        <translation>Local version</translation>
+    </message>
+    <message>
+        <source>服务端版本</source>
+        <translation>Server version</translation>
+    </message>
+    <message>
+        <source>使用本地版本</source>
+        <translation>Use local version</translation>
+    </message>
+    <message>
+        <source>使用服务端版本</source>
+        <translation>Use server version</translation>
     </message>
 </context>
 <context>

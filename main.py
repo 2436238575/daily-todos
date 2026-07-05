@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from core.database import Database
 from core.scheduler import DailyScheduler
+from core.sync_manager import SyncManager, sync_error_message
 from core.task_manager import TaskManager
 from lib.utils import APP_NAME, BASE_DIR, apply_theme, create_app_icon, load_settings, setup_logging
 from ui.main_window import MainWindow
@@ -130,14 +131,21 @@ def main() -> int:
     database.initialize()
     task_manager = TaskManager(database)
     scheduler = DailyScheduler(task_manager)
+    sync_manager = SyncManager(database)
     scheduler.start()
 
-    window = MainWindow(task_manager, scheduler)
+    window = MainWindow(task_manager, scheduler, sync_manager)
     single_instance.window = window
     window.show()
 
     def shutdown() -> None:
         logger.info("Shutting down DailyTodo")
+        sync = load_settings().get("sync", {})
+        if sync.get("refresh_token") and sync.get("initialized"):
+            try:
+                sync_manager.sync("normal")
+            except Exception as exc:
+                logger.info("Exit sync skipped or failed: %s", sync_error_message(exc))
         scheduler.stop()
         database.close()
 

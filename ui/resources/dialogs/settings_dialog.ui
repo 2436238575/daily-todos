@@ -10,7 +10,7 @@
     <x>0</x>
     <y>0</y>
     <width>520</width>
-    <height>560</height>
+   <height>480</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
@@ -64,46 +64,100 @@
        </property>
       </widget>
      </item>
-     <item row="4" column="0">
-      <widget class="QLabel" name="sqliteSyncLabel">
-       <property name="text">
-        <string>SQLite-Sync</string>
-       </property>
-      </widget>
-     </item>
-     <item row="4" column="1">
-      <widget class="QCheckBox" name="sqliteSyncCheckBox">
-       <property name="text">
-        <string>启用</string>
-       </property>
-      </widget>
-     </item>
-     <item row="5" column="0">
-      <widget class="QLabel" name="postgresqlSyncUrlLabel">
-       <property name="text">
-        <string>PostgreSQL Sync URL</string>
-       </property>
-      </widget>
-     </item>
-     <item row="5" column="1">
-      <layout class="QHBoxLayout" name="postgresqlSyncUrlLayout">
-       <item>
-        <widget class="QLineEdit" name="postgresqlSyncUrlLineEdit">
-         <property name="placeholderText">
-          <string>postgresql://[user[:password]@][host][:port][/database]</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="testPostgresqlSyncButton">
-         <property name="text">
-          <string>测试</string>
-         </property>
-        </widget>
-       </item>
-      </layout>
-     </item>
     </layout>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="syncGroupBox">
+     <property name="title">
+      <string>同步</string>
+     </property>
+     <layout class="QVBoxLayout" name="syncGroupLayout">
+      <item>
+       <layout class="QFormLayout" name="syncFormLayout">
+        <item row="0" column="0">
+         <widget class="QLabel" name="syncServerUrlLabel">
+          <property name="text">
+           <string>服务器地址</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLineEdit" name="syncServerUrlLineEdit">
+          <property name="placeholderText">
+           <string>http://localhost:8080</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="syncUsernameLabel">
+          <property name="text">
+           <string>用户名</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLineEdit" name="syncUsernameLineEdit"/>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="syncPasswordLabel">
+          <property name="text">
+           <string>密码</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QLineEdit" name="syncPasswordLineEdit"/>
+        </item>
+        <item row="3" column="0">
+         <widget class="QLabel" name="syncStatusLabel">
+          <property name="text">
+           <string>状态</string>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="1">
+         <widget class="QLabel" name="syncStatusValueLabel">
+          <property name="text">
+           <string>未登录</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="syncButtonsLayout">
+        <item>
+         <widget class="QPushButton" name="syncLoginButton">
+          <property name="text">
+           <string>登录</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="syncLogoutButton">
+          <property name="text">
+           <string>退出登录</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="syncNowButton">
+          <property name="text">
+           <string>立即同步</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="syncConflictsButton">
+          <property name="text">
+           <string>冲突中心</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
    </item>
    <item>
     <widget class="QLabel" name="templateLabel">

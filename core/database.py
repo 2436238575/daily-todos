@@ -1,82 +1,20 @@
-"""SQLite database access and archival support for DailyTodo."""
+"""SQLite database access for DailyTodo."""
 
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
 import threading
+import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator, Sequence
-from urllib.parse import urlparse
-
-from lib.utils import load_settings
 
 
 class DatabaseError(RuntimeError):
     """Raised when a database operation fails."""
-
-
-@dataclass(frozen=True)
-class SyncTestResult:
-    ok: bool
-    message: str
-
-
-def validate_postgresql_url(url: str) -> SyncTestResult:
-    parsed = urlparse(url.strip())
-    if parsed.scheme not in {"postgresql", "postgres"}:
-        return SyncTestResult(False, "URL must start with postgresql://")
-    if not parsed.hostname:
-        return SyncTestResult(False, "URL must include a host")
-    return SyncTestResult(True, "URL format is valid")
-
-
-def test_postgresql_connection(url: str, *, timeout: int = 5) -> SyncTestResult:
-    validation = validate_postgresql_url(url)
-    if not validation.ok:
-        return validation
-
-    driver = _load_postgresql_driver()
-    if driver is None:
-        return SyncTestResult(False, "PostgreSQL driver is not installed")
-
-    driver_name, module = driver
-    try:
-        if driver_name == "psycopg":
-            with module.connect(url, connect_timeout=timeout) as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT 1")
-                    cursor.fetchone()
-        else:
-            connection = module.connect(url, connect_timeout=timeout)
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT 1")
-                    cursor.fetchone()
-            finally:
-                connection.close()
-    except Exception as exc:
-        return SyncTestResult(False, f"PostgreSQL connection failed: {exc}")
-    return SyncTestResult(True, "PostgreSQL connection succeeded")
-
-
-def _load_postgresql_driver():
-    try:
-        import psycopg
-
-        return "psycopg", psycopg
-    except ImportError:
-        pass
-
-    try:
-        import psycopg2
-
-        return "psycopg2", psycopg2
-    except ImportError:
-        return None
 
 
 class Database:
@@ -89,7 +27,6 @@ class Database:
         self.data_dir = self.db_path.parent
         self.archive_dir = self.data_dir / "archive"
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.archive_dir.mkdir(parents=True, exist_ok=True)
 
         try:
             self.connection = sqlite3.connect(
@@ -106,7 +43,7 @@ class Database:
             raise DatabaseError(f"Failed to connect to database: {self.db_path}") from exc
 
     def initialize(self) -> None:
-        """Create required tables and archive stale rows."""
+        """Create required tables and import legacy archive rows once."""
 
         try:
             with self.transaction():
@@ -119,14 +56,32 @@ class Database:
                         is_completed INTEGER NOT NULL DEFAULT 0 CHECK(is_completed IN (0, 1)),
                         sort_order INTEGER NOT NULL DEFAULT 0,
                         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        uid TEXT NOT NULL DEFAULT '',
+                        base_version INTEGER NOT NULL DEFAULT 0,
+                        deleted_at TEXT,
+                        last_synced_at TEXT,
+                        sync_dirty INTEGER NOT NULL DEFAULT 1 CHECK(sync_dirty IN (0, 1))
                     )
                     """
                 )
+                self._ensure_sync_columns()
                 self.connection.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_tasks_target_date_sort
                     ON tasks(target_date, sort_order, id)
+                    """
+                )
+                self.connection.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_uid
+                    ON tasks(uid)
+                    """
+                )
+                self.connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_tasks_sync_dirty
+                    ON tasks(sync_dirty, deleted_at)
                     """
                 )
                 self.connection.execute(
@@ -138,9 +93,9 @@ class Database:
                     )
                     """
                 )
-            self._archive_previous_month()
-            self._try_optional_sync()
-        except sqlite3.Error as exc:
+                self._ensure_task_uids()
+            self._merge_archived_tasks_once()
+        except (sqlite3.Error, DatabaseError) as exc:
             self.logger.exception("Database initialization failed")
             raise DatabaseError("Database initialization failed") from exc
 
@@ -200,33 +155,30 @@ class Database:
     def get_tasks_by_date(self, date_str: str) -> list[sqlite3.Row]:
         rows = self.fetch_all(
             """
-            SELECT id, content, target_date, is_completed, sort_order, created_at, updated_at
+            SELECT id, uid, content, target_date, is_completed, sort_order,
+                   created_at, updated_at, base_version, deleted_at, last_synced_at, sync_dirty
             FROM tasks
-            WHERE target_date = ?
+            WHERE target_date = ? AND deleted_at IS NULL
             ORDER BY sort_order ASC, id ASC
             """,
             (date_str,),
         )
-        if rows:
-            return rows
-        return self._get_archived_tasks_by_date(date_str)
+        return rows
 
     def get_task_dates(self, max_date: str) -> set[str]:
         rows = self.fetch_all(
             """
             SELECT DISTINCT target_date
             FROM tasks
-            WHERE target_date <= ?
+            WHERE target_date <= ? AND deleted_at IS NULL
             """,
             (max_date,),
         )
-        dates = {str(row["target_date"]) for row in rows}
-        dates.update(self._get_archived_task_dates(max_date))
-        return dates
+        return {str(row["target_date"]) for row in rows}
 
     def count_tasks_by_date(self, date_str: str) -> int:
         row = self.fetch_one(
-            "SELECT COUNT(*) AS count FROM tasks WHERE target_date = ?",
+            "SELECT COUNT(*) AS count FROM tasks WHERE target_date = ? AND deleted_at IS NULL",
             (date_str,),
         )
         return int(row["count"]) if row else 0
@@ -235,10 +187,10 @@ class Database:
         with self.transaction():
             self.executemany(
                 """
-                INSERT INTO tasks(content, target_date, sort_order)
-                VALUES(?, ?, ?)
+                INSERT INTO tasks(uid, content, target_date, sort_order, sync_dirty)
+                VALUES(?, ?, ?, ?, ?)
                 """,
-                values,
+                [(str(uuid.uuid4()), content, target_date, sort_order, 1) for content, target_date, sort_order in values],
             )
 
     def add_task(self, content: str, target_date: str, sort_order: int | None = None) -> int:
@@ -251,10 +203,10 @@ class Database:
 
         cursor = self.execute(
             """
-            INSERT INTO tasks(content, target_date, sort_order)
-            VALUES(?, ?, ?)
+            INSERT INTO tasks(uid, content, target_date, sort_order, sync_dirty)
+            VALUES(?, ?, ?, ?, 1)
             """,
-            (content, target_date, sort_order),
+            (str(uuid.uuid4()), content, target_date, sort_order),
         )
         return int(cursor.lastrowid)
 
@@ -283,6 +235,7 @@ class Database:
             return True
 
         fields.append("updated_at = CURRENT_TIMESTAMP")
+        fields.append("sync_dirty = 1")
         values.append(task_id)
         cursor = self.execute(
             f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?",
@@ -291,16 +244,106 @@ class Database:
         return cursor.rowcount > 0
 
     def delete_task(self, task_id: int) -> bool:
-        cursor = self.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        cursor = self.execute(
+            """
+            UPDATE tasks
+            SET deleted_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP,
+                sync_dirty = 1
+            WHERE id = ? AND deleted_at IS NULL
+            """,
+            (task_id,),
+        )
         return cursor.rowcount > 0
 
     def reorder_tasks(self, ordered_ids: Sequence[int]) -> None:
         with self.transaction():
             for sort_order, task_id in enumerate(ordered_ids):
                 self.execute(
-                    "UPDATE tasks SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    """
+                    UPDATE tasks
+                    SET sort_order = ?,
+                        updated_at = CURRENT_TIMESTAMP,
+                        sync_dirty = 1
+                    WHERE id = ? AND deleted_at IS NULL
+                    """,
                     (sort_order, task_id),
                 )
+
+    def get_dirty_tasks(self) -> list[sqlite3.Row]:
+        return self.fetch_all(
+            """
+            SELECT id, uid, content, target_date, is_completed, sort_order,
+                   created_at, updated_at, base_version, deleted_at, last_synced_at, sync_dirty
+            FROM tasks
+            WHERE sync_dirty = 1
+            ORDER BY target_date ASC, sort_order ASC, id ASC
+            """
+        )
+
+    def get_task_by_uid(self, uid: str) -> sqlite3.Row | None:
+        return self.fetch_one(
+            """
+            SELECT id, uid, content, target_date, is_completed, sort_order,
+                   created_at, updated_at, base_version, deleted_at, last_synced_at, sync_dirty
+            FROM tasks
+            WHERE uid = ?
+            """,
+            (uid,),
+        )
+
+    def mark_task_synced(self, uid: str, version: int) -> None:
+        self.execute(
+            """
+            UPDATE tasks
+            SET base_version = ?,
+                sync_dirty = 0,
+                last_synced_at = CURRENT_TIMESTAMP
+            WHERE uid = ?
+            """,
+            (version, uid),
+        )
+
+    def upsert_remote_task(self, payload: dict[str, Any]) -> None:
+        deleted_at = datetime.now().isoformat(timespec="seconds") if bool(payload.get("deleted", False)) else None
+        existing = self.get_task_by_uid(str(payload["id"]))
+        values = (
+            str(payload["id"]),
+            str(payload.get("content", "")),
+            str(payload["target_date"]),
+            1 if bool(payload.get("completed", False)) else 0,
+            int(payload.get("sort_order", 0)),
+            int(payload.get("version", 0)),
+            deleted_at,
+        )
+        if existing is None:
+            self.execute(
+                """
+                INSERT INTO tasks(
+                    uid, content, target_date, is_completed, sort_order,
+                    base_version, deleted_at, sync_dirty, last_synced_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+                """,
+                values,
+            )
+            return
+        self.execute(
+            """
+            UPDATE tasks
+            SET content = ?,
+                target_date = ?,
+                is_completed = ?,
+                sort_order = ?,
+                base_version = ?,
+                deleted_at = ?,
+                updated_at = CURRENT_TIMESTAMP,
+                sync_dirty = 0,
+                last_synced_at = CURRENT_TIMESTAMP
+            WHERE uid = ?
+            """,
+            (values[1], values[2], values[3], values[4], values[5], values[6], values[0]),
+        )
 
     def close(self) -> None:
         with self._lock:
@@ -309,129 +352,76 @@ class Database:
             except sqlite3.Error:
                 self.logger.exception("Failed to close database connection")
 
-    def _try_optional_sync(self) -> None:
-        settings = load_settings()
-        if not bool(settings.get("sqlite_sync", False)):
-            return
+    def backup_before_cloud_download(self) -> Path:
+        backup_path = self.data_dir / f"todo.before-cloud-download.{datetime.now().strftime('%Y%m%d%H%M%S')}.db"
+        with self._lock:
+            self.connection.execute("PRAGMA wal_checkpoint(FULL)")
+            shutil.copy2(self.db_path, backup_path)
+        return backup_path
 
-        postgresql_url = str(settings.get("postgresql_sync_url", "")).strip()
-        if not postgresql_url:
-            self.logger.warning("SQLite-Sync is enabled but PostgreSQL Sync URL is empty")
-            return
+    def prepare_for_cloud_download(self) -> None:
+        """Hide local rows before applying a full cloud snapshot."""
 
-        result = self._try_sqlite_sync(postgresql_url)
-        if result.ok:
-            self.logger.info("%s", result.message)
-            return
-        self.logger.warning("SQLite-Sync skipped: %s", result.message)
-
-    def _try_sqlite_sync(self, postgresql_url: str) -> SyncTestResult:
-        validation = validate_postgresql_url(postgresql_url)
-        if not validation.ok:
-            return validation
-
-        driver = _load_postgresql_driver()
-        if driver is None:
-            return SyncTestResult(False, "PostgreSQL driver is not installed")
-
-        rows = self.fetch_all(
+        self.execute(
             """
-            SELECT id, content, target_date, is_completed, sort_order, created_at, updated_at
-            FROM tasks
-            ORDER BY target_date ASC, sort_order ASC, id ASC
+            UPDATE tasks
+            SET deleted_at = COALESCE(deleted_at, CURRENT_TIMESTAMP),
+                sync_dirty = 0,
+                last_synced_at = CURRENT_TIMESTAMP
             """
         )
 
-        driver_name, module = driver
-        try:
-            if driver_name == "psycopg":
-                with module.connect(postgresql_url, connect_timeout=5) as connection:
-                    with connection.cursor() as cursor:
-                        self._sync_rows_to_postgresql(cursor, rows)
-            else:
-                connection = module.connect(postgresql_url, connect_timeout=5)
-                try:
-                    with connection.cursor() as cursor:
-                        self._sync_rows_to_postgresql(cursor, rows)
-                    connection.commit()
-                except Exception:
-                    connection.rollback()
-                    raise
-                finally:
-                    connection.close()
-        except Exception as exc:
-            return SyncTestResult(False, f"PostgreSQL sync failed: {exc}")
-        return SyncTestResult(True, f"SQLite-Sync uploaded {len(rows)} task row(s)")
+    def _merge_archived_tasks_once(self) -> None:
+        """Import rows from legacy monthly archive databases into the main database."""
 
-    def _sync_rows_to_postgresql(self, cursor, rows: Sequence[sqlite3.Row]) -> None:
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tasks (
-                id INTEGER PRIMARY KEY,
-                content TEXT NOT NULL,
-                target_date TEXT NOT NULL,
-                is_completed INTEGER NOT NULL DEFAULT 0,
-                sort_order INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        for row in rows:
-            cursor.execute(
-                """
-                INSERT INTO tasks(
-                    id, content, target_date, is_completed, sort_order, created_at, updated_at
+        if self.get_metadata("archive_merge_completed_at") is not None:
+            return
+
+        imported = 0
+        archive_paths = sorted(self.archive_dir.glob("todo_????-??.db")) if self.archive_dir.exists() else []
+        with self.transaction():
+            for archive_path in archive_paths:
+                rows = self._fetch_archive_rows(
+                    archive_path,
+                    """
+                    SELECT id, content, target_date, is_completed, sort_order, created_at, updated_at
+                    FROM tasks
+                    ORDER BY target_date ASC, sort_order ASC, id ASC
+                    """,
+                    (),
                 )
-                VALUES(%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    content = EXCLUDED.content,
-                    target_date = EXCLUDED.target_date,
-                    is_completed = EXCLUDED.is_completed,
-                    sort_order = EXCLUDED.sort_order,
-                    created_at = EXCLUDED.created_at,
-                    updated_at = EXCLUDED.updated_at
-                """,
-                (
-                    int(row["id"]),
-                    str(row["content"]),
-                    str(row["target_date"]),
-                    int(row["is_completed"]),
-                    int(row["sort_order"]),
-                    str(row["created_at"]),
-                    str(row["updated_at"]),
-                ),
-            )
-
-    def _get_archived_tasks_by_date(self, date_str: str) -> list[sqlite3.Row]:
-        archive_path = self.archive_dir / f"todo_{date_str[:7]}.db"
-        if not archive_path.exists():
-            return []
-        return self._fetch_archive_rows(
-            archive_path,
-            """
-            SELECT id, content, target_date, is_completed, sort_order, created_at, updated_at
-            FROM tasks
-            WHERE target_date = ?
-            ORDER BY sort_order ASC, id ASC
-            """,
-            (date_str,),
-        )
-
-    def _get_archived_task_dates(self, max_date: str) -> set[str]:
-        dates: set[str] = set()
-        for archive_path in self.archive_dir.glob("todo_????-??.db"):
-            rows = self._fetch_archive_rows(
-                archive_path,
+                for row in rows:
+                    cursor = self.execute(
+                        """
+                        INSERT OR IGNORE INTO tasks(
+                            id, uid, content, target_date, is_completed, sort_order,
+                            created_at, updated_at, sync_dirty
+                        )
+                        VALUES(?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        """,
+                        (
+                            int(row["id"]),
+                            str(uuid.uuid4()),
+                            str(row["content"]),
+                            str(row["target_date"]),
+                            int(row["is_completed"]),
+                            int(row["sort_order"]),
+                            str(row["created_at"]),
+                            str(row["updated_at"]),
+                        ),
+                    )
+                    imported += cursor.rowcount
+            self.execute(
                 """
-                SELECT DISTINCT target_date
-                FROM tasks
-                WHERE target_date <= ?
-                """,
-                (max_date,),
+                INSERT INTO metadata(key, value, updated_at)
+                VALUES('archive_merge_completed_at', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = CURRENT_TIMESTAMP
+                """
             )
-            dates.update(str(row["target_date"]) for row in rows)
-        return dates
+        if archive_paths:
+            self.logger.info("Imported %s legacy archive task row(s) into the main database", imported)
 
     def _fetch_archive_rows(
         self,
@@ -450,113 +440,20 @@ class Database:
             self.logger.exception("Failed to read archive database: %s", archive_path)
             raise DatabaseError("Failed to read archive database") from exc
 
-    def _archive_previous_month(self) -> None:
-        """Move rows older than the current month into per-month archive DBs."""
+    def _ensure_sync_columns(self) -> None:
+        columns = {str(row["name"]) for row in self.connection.execute("PRAGMA table_info(tasks)").fetchall()}
+        migrations = {
+            "uid": "ALTER TABLE tasks ADD COLUMN uid TEXT NOT NULL DEFAULT ''",
+            "base_version": "ALTER TABLE tasks ADD COLUMN base_version INTEGER NOT NULL DEFAULT 0",
+            "deleted_at": "ALTER TABLE tasks ADD COLUMN deleted_at TEXT",
+            "last_synced_at": "ALTER TABLE tasks ADD COLUMN last_synced_at TEXT",
+            "sync_dirty": "ALTER TABLE tasks ADD COLUMN sync_dirty INTEGER NOT NULL DEFAULT 1",
+        }
+        for column, sql in migrations.items():
+            if column not in columns:
+                self.connection.execute(sql)
 
-        first_day_this_month = date.today().replace(day=1).isoformat()
-        rows = self.fetch_all(
-            """
-            SELECT id, content, target_date, is_completed, sort_order, created_at, updated_at
-            FROM tasks
-            WHERE target_date < ?
-            ORDER BY target_date ASC, sort_order ASC, id ASC
-            """,
-            (first_day_this_month,),
-        )
-        if not rows:
-            return
-
-        grouped: dict[str, list[sqlite3.Row]] = {}
+    def _ensure_task_uids(self) -> None:
+        rows = self.connection.execute("SELECT id FROM tasks WHERE uid = '' OR uid IS NULL").fetchall()
         for row in rows:
-            grouped.setdefault(str(row["target_date"])[:7], []).append(row)
-
-        with self._lock:
-            try:
-                self.connection.execute("PRAGMA wal_checkpoint(FULL)")
-                for month, month_rows in grouped.items():
-                    archive_path = self.archive_dir / f"todo_{month}.db"
-                    self._write_archive_month(archive_path, month, month_rows)
-
-                with self.transaction():
-                    self.execute("DELETE FROM tasks WHERE target_date < ?", (first_day_this_month,))
-                    self.set_metadata("last_archive_month", date.today().strftime("%Y-%m"))
-                self.connection.execute("VACUUM")
-                self.logger.info("Archived %s task rows into %s monthly DB(s)", len(rows), len(grouped))
-            except (OSError, sqlite3.Error, DatabaseError) as exc:
-                self.logger.exception("Monthly archive failed")
-                raise DatabaseError("Monthly archive failed") from exc
-
-    def _write_archive_month(
-        self,
-        archive_path: Path,
-        month: str,
-        rows: Sequence[sqlite3.Row],
-    ) -> None:
-        archive_path.parent.mkdir(parents=True, exist_ok=True)
-        archive = sqlite3.connect(archive_path)
-        try:
-            archive.execute("PRAGMA journal_mode = WAL")
-            archive.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id INTEGER PRIMARY KEY,
-                    content TEXT NOT NULL CHECK(length(trim(content)) > 0),
-                    target_date TEXT NOT NULL,
-                    is_completed INTEGER NOT NULL DEFAULT 0 CHECK(is_completed IN (0, 1)),
-                    sort_order INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-                """
-            )
-            archive.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_tasks_target_date_sort
-                ON tasks(target_date, sort_order, id)
-                """
-            )
-            archive.execute(
-                """
-                CREATE TABLE IF NOT EXISTS metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL,
-                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            archive.executemany(
-                """
-                INSERT OR REPLACE INTO tasks(
-                    id, content, target_date, is_completed, sort_order, created_at, updated_at
-                )
-                VALUES(?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        int(row["id"]),
-                        str(row["content"]),
-                        str(row["target_date"]),
-                        int(row["is_completed"]),
-                        int(row["sort_order"]),
-                        str(row["created_at"]),
-                        str(row["updated_at"]),
-                    )
-                    for row in rows
-                ],
-            )
-            archive.execute(
-                """
-                INSERT INTO metadata(key, value, updated_at)
-                VALUES('archive_month', ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(key) DO UPDATE SET
-                    value = excluded.value,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (month,),
-            )
-            archive.commit()
-        except Exception:
-            archive.rollback()
-            raise
-        finally:
-            archive.close()
+            self.connection.execute("UPDATE tasks SET uid = ?, sync_dirty = 1 WHERE id = ?", (str(uuid.uuid4()), row["id"]))

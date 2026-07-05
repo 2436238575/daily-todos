@@ -14,12 +14,17 @@ from core.database import Database
 @dataclass(frozen=True)
 class Task:
     id: int
+    uid: str
     content: str
     target_date: str
     is_completed: bool
     sort_order: int
     created_at: str
     updated_at: str
+    base_version: int
+    deleted_at: str | None
+    last_synced_at: str | None
+    sync_dirty: bool
 
 
 class TaskManager:
@@ -44,6 +49,8 @@ class TaskManager:
     def insert_from_template(self, date_str: str, template_list: Iterable[dict[str, Any]]) -> int:
         values: list[tuple[str, str, int]] = []
         for index, item in enumerate(template_list):
+            if bool(item.get("deleted", False)):
+                continue
             content = str(item.get("content", "")).strip()
             if not content:
                 continue
@@ -100,10 +107,15 @@ class TaskManager:
     def _row_to_task(row: Any) -> Task:
         return Task(
             id=int(row["id"]),
+            uid=str(row["uid"]),
             content=str(row["content"]),
             target_date=str(row["target_date"]),
             is_completed=bool(row["is_completed"]),
             sort_order=int(row["sort_order"]),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
+            base_version=int(row["base_version"]),
+            deleted_at=str(row["deleted_at"]) if row["deleted_at"] is not None else None,
+            last_synced_at=str(row["last_synced_at"]) if row["last_synced_at"] is not None else None,
+            sync_dirty=bool(row["sync_dirty"]),
         )
