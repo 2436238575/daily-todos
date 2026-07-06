@@ -25,6 +25,7 @@ class DailyScheduler(QThread):
         self._last_reset_date: str | None = None
 
     def run(self) -> None:
+        self.logger.info("Daily scheduler thread started")
         self._timer = QTimer()
         self._timer.setInterval(60_000)
         self._timer.timeout.connect(self._on_timeout, Qt.ConnectionType.DirectConnection)
@@ -34,10 +35,12 @@ class DailyScheduler(QThread):
         self._timer.stop()
         self._timer.deleteLater()
         self._timer = None
+        self.logger.info("Daily scheduler thread exited")
 
     @Slot()
     def _startup_check(self) -> None:
         today = date.today().isoformat()
+        self.logger.info("Scheduler startup check for %s", today)
         self._check_and_fill(today)
         self._last_reset_date = today
 
@@ -49,6 +52,7 @@ class DailyScheduler(QThread):
         today = now.date().isoformat()
 
         if now.strftime("%H:%M") >= reset_time and self._last_reset_date != today:
+            self.logger.info("Daily reset threshold reached: date=%s, reset_time=%s", today, reset_time)
             self._check_and_fill(today)
             self._last_reset_date = today
 
@@ -56,7 +60,7 @@ class DailyScheduler(QThread):
         try:
             count = self.task_manager.count_tasks_by_date(date_str)
             if count > 0:
-                self.logger.debug("Tasks already exist for %s; skip reset fill", date_str)
+                self.logger.info("Tasks already exist for %s; skip reset fill: count=%s", date_str, count)
                 self.reset_finished.emit(date_str, 0)
                 return
 
@@ -65,11 +69,13 @@ class DailyScheduler(QThread):
                 date_str,
                 settings.get("daily_template", []),
             )
+            self.logger.info("Daily reset fill completed: date=%s, inserted=%s", date_str, inserted)
             self.reset_finished.emit(date_str, inserted)
         except Exception as exc:
             self.logger.exception("Daily reset failed")
             self.reset_failed.emit(str(exc))
 
     def stop(self) -> None:
+        self.logger.info("Stopping daily scheduler")
         self.quit()
         self.wait(3000)

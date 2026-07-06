@@ -150,6 +150,29 @@
         <source>已登录，尚未首次同步</source>
         <translation>已登录，尚未首次同步</translation>
     </message>
+    <message>
+        <source>关于</source>
+        <translation>关于</translation>
+    </message>
+</context>
+<context>
+    <name>AboutDialog</name>
+    <message>
+        <source>关于</source>
+        <translation>关于</translation>
+    </message>
+    <message>
+        <source>构建类型</source>
+        <translation>构建类型</translation>
+    </message>
+    <message>
+        <source>版本号</source>
+        <translation>版本号</translation>
+    </message>
+    <message>
+        <source>项目仓库</source>
+        <translation>项目仓库</translation>
+    </message>
 </context>
 <context>
     <name>ConflictDialog</name>

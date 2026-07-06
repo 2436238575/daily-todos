@@ -150,6 +150,29 @@
         <source>已登录，尚未首次同步</source>
         <translation>Logged in, first sync not run</translation>
     </message>
+    <message>
+        <source>关于</source>
+        <translation>About</translation>
+    </message>
+</context>
+<context>
+    <name>AboutDialog</name>
+    <message>
+        <source>关于</source>
+        <translation>About</translation>
+    </message>
+    <message>
+        <source>构建类型</source>
+        <translation>Build type</translation>
+    </message>
+    <message>
+        <source>版本号</source>
+        <translation>Version</translation>
+    </message>
+    <message>
+        <source>项目仓库</source>
+        <translation>Project repository</translation>
+    </message>
 </context>
 <context>
     <name>ConflictDialog</name>

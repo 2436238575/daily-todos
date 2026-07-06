@@ -94,6 +94,14 @@ class TaskManager:
         )
         if not updated:
             raise ValueError(f"Task {task_id} does not exist")
+        fields = []
+        if content is not None:
+            fields.append(f"content_len={len(content)}")
+        if is_completed is not None:
+            fields.append(f"is_completed={is_completed}")
+        if sort_order is not None:
+            fields.append(f"sort_order={sort_order}")
+        self.logger.info("Updated task %s: %s", task_id, ", ".join(fields) or "no fields")
 
     def delete_task(self, task_id: int) -> None:
         if not self.database.delete_task(task_id):
@@ -102,6 +110,7 @@ class TaskManager:
 
     def reorder_tasks(self, ordered_ids: list[int]) -> None:
         self.database.reorder_tasks(ordered_ids)
+        self.logger.info("Reordered %s task(s)", len(ordered_ids))
 
     @staticmethod
     def _row_to_task(row: Any) -> Task:

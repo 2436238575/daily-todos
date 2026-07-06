@@ -40,6 +40,9 @@ data/todo.db-wal
 data/archive/
 logs/app.log
 logs/app.log.*
+logs/gui.log
+logs/gui.log.*
+build_info.json
 
 # User-specific config
 config/settings.json

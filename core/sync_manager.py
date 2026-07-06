@@ -34,6 +34,7 @@ class SyncManager:
             raise ValueError("Server URL cannot be empty")
         if not username:
             raise ValueError("Username cannot be empty")
+        self.logger.info("Sync login started: device=%s, username_len=%s", device_name, len(username))
         bundle = SyncClient(server_url).login(username, password, device_name)
         settings = load_settings()
         settings["sync"].update(
@@ -45,12 +46,14 @@ class SyncManager:
             }
         )
         save_settings(settings)
+        self.logger.info("Sync login completed: server_version=%s", bundle.server_version)
         return SyncResult("登录成功。", [])
 
     def logout(self) -> SyncResult:
         settings = load_settings()
         sync = settings["sync"]
         refresh_token = str(sync.get("refresh_token", ""))
+        self.logger.info("Sync logout started: remote=%s", bool(refresh_token and sync.get("server_url")))
         if refresh_token and sync.get("server_url"):
             try:
                 client, bundle = self._refresh(settings)
@@ -60,6 +63,7 @@ class SyncManager:
         sync.update({"refresh_token": "", "initialized": False})
         save_settings(settings)
         self.last_conflicts = []
+        self.logger.info("Sync logout completed")
         return SyncResult("已退出登录。", [])
 
     def sync(self, mode: SyncMode = "normal") -> SyncResult:
@@ -72,25 +76,46 @@ class SyncManager:
 
         accepted_count = 0
         conflicts: list[dict[str, Any]] = []
+        self.logger.info("Sync started: mode=%s, starting_version=%s", mode, starting_version)
 
         if mode == "download":
             self.database.backup_before_cloud_download()
             self.database.prepare_for_cloud_download()
             settings["daily_template"] = []
             pull_since = 0
+            self.logger.info("Sync download mode prepared local snapshot replacement")
         else:
             push_payload = self._build_push_payload(settings)
+            self.logger.info(
+                "Sync push payload built: tasks=%s, template_items=%s",
+                len(push_payload["tasks"]),
+                len(push_payload["template_items"]),
+            )
             if push_payload["tasks"] or push_payload["template_items"]:
                 pushed = client.push(access_token, push_payload)
                 accepted_count += self._apply_accepted(pushed.get("accepted", []), settings)
                 conflicts.extend(list(pushed.get("conflicts", [])))
                 last_version = max(last_version, int(pushed.get("server_version", last_version)))
+                self.logger.info(
+                    "Sync push completed: accepted=%s, conflicts=%s, server_version=%s",
+                    accepted_count,
+                    len(conflicts),
+                    last_version,
+                )
             pull_since = 0 if mode in {"upload", "merge"} and not sync.get("initialized") else starting_version
 
         pulled = client.pull(access_token, pull_since)
         conflicts.extend(list(pulled.get("conflicts", [])))
         self._apply_pull(pulled, settings, conflicts)
         last_version = int(pulled.get("server_version", last_version))
+        self.logger.info(
+            "Sync pull completed: since=%s, tasks=%s, template_items=%s, conflicts=%s, server_version=%s",
+            pull_since,
+            len(pulled.get("tasks", [])),
+            len(pulled.get("template_items", [])),
+            len(conflicts),
+            last_version,
+        )
 
         sync.update(
             {
@@ -103,12 +128,15 @@ class SyncManager:
         save_settings(settings)
         self.last_conflicts = conflicts
         if conflicts:
+            self.logger.info("Sync completed with conflicts: conflicts=%s", len(conflicts))
             return SyncResult(f"同步完成，发现 {len(conflicts)} 个冲突。", conflicts)
+        self.logger.info("Sync completed: accepted=%s", accepted_count)
         return SyncResult(f"同步完成，已上传 {accepted_count} 项变更。", [])
 
     def resolve_conflicts(self, resolutions: list[dict[str, Any]]) -> SyncResult:
         if not resolutions:
             return SyncResult("没有需要解决的冲突。", [])
+        self.logger.info("Conflict resolution started: count=%s", len(resolutions))
         settings = load_settings()
         client, bundle = self._refresh(settings)
         response = client.resolve(bundle.access_token, {"resolutions": resolutions})
@@ -129,6 +157,11 @@ class SyncManager:
         save_settings(settings)
         resolved_ids = {str(item.get("conflict_id")) for item in resolutions}
         self.last_conflicts = [conflict for conflict in self.last_conflicts if str(conflict.get("id")) not in resolved_ids]
+        self.logger.info(
+            "Conflict resolution completed: resolved=%s, remaining=%s",
+            len(resolutions),
+            len(self.last_conflicts),
+        )
         return SyncResult(f"已解决 {len(resolutions)} 个冲突。", self.last_conflicts)
 
     def _refresh(self, settings: dict[str, Any]) -> tuple[SyncClient, TokenBundle]:

@@ -9,7 +9,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from lib.logging_utils import write_build_info
+
 SPEC_PATH = ROOT / "pysidedeploy.spec"
+BUILD_INFO_PATH = ROOT / "build" / "build_info.json"
 DEFAULT_VERSION = "0.0.0"
 BUILD_TYPES = {"dev", "release"}
 VERSION_RE = re.compile(r"^v?(\d+(?:\.\d+){0,3})$")
@@ -52,6 +57,7 @@ def main() -> int:
         return 2
 
     buildozer_mode = "release" if args.build_type == "release" else "debug"
+    write_build_info(BUILD_INFO_PATH, version=version, build_type=args.build_type)
     python_path = Path(sys.executable).resolve()
     icon_path = (
         python_path.parent.parent
@@ -74,6 +80,7 @@ def main() -> int:
             "--include-data-dir=ui/resources=ui/resources",
             "--include-data-dir=translations=translations",
             "--include-data-file=config/style.qss=config/style.qss",
+            "--include-data-file=build/build_info.json=build_info.json",
             *(
                 ["--windows-console-mode=disable"]
                 if args.build_type == "release" and sys.platform == "win32"

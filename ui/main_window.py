@@ -80,9 +80,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1500, self._attempt_startup_sync)
 
     def refresh_today_view(self) -> None:
+        self.logger.info("Refreshing today view")
         self._select_date(date.today().isoformat())
 
     def refresh_current_view(self) -> None:
+        self.logger.info("Refreshing current view: date=%s", self._selected_date)
         self._refresh_available_dates()
         self._render_selected_date()
 
@@ -90,8 +92,10 @@ class MainWindow(QMainWindow):
         self._refresh_available_dates()
         today = date.today().isoformat()
         if date_str > today or (date_str != today and date_str not in self._available_dates):
+            self.logger.info("Date selection ignored: date=%s, available=%s", date_str, date_str in self._available_dates)
             return
         self._selected_date = date_str
+        self.logger.info("Selected date changed: date=%s", date_str)
         self._render_selected_date()
 
     def _render_selected_date(self) -> None:
@@ -113,6 +117,12 @@ class MainWindow(QMainWindow):
             )
             for task in tasks:
                 self._add_task_item(task, read_only=is_history)
+            self.logger.info(
+                "Rendered task list: date=%s, count=%s, history=%s",
+                selected_date,
+                len(tasks),
+                is_history,
+            )
         except Exception as exc:
             self.logger.exception("Failed to refresh tasks for %s", selected_date)
             QMessageBox.critical(self, self.tr("刷新失败"), str(exc))
@@ -120,12 +130,14 @@ class MainWindow(QMainWindow):
             self._refreshing = False
 
     def show_from_tray(self) -> None:
+        self.logger.info("Showing main window from tray")
         self.refresh_today_view()
         self.showNormal()
         self.raise_()
         self.activateWindow()
 
     def request_quit(self) -> None:
+        self.logger.info("Quit requested from UI")
         self._allow_close = True
         self.quit_requested.emit()
         QApplication.instance().quit()
@@ -165,6 +177,7 @@ class MainWindow(QMainWindow):
             return
         event.ignore()
         self.hide()
+        self.logger.info("Main window hidden to tray")
         if self.tray_icon is not None:
             self.tray_icon.showMessage(
                 "DailyTodo",
@@ -221,10 +234,15 @@ class MainWindow(QMainWindow):
 
         selected_action = menu.exec(self.task_list.viewport().mapToGlobal(position))
         if selected_action == refresh_action:
+            self.logger.info("Context menu refresh selected: date=%s", self._selected_date)
             self.refresh_current_view()
         elif selected_action == add_action:
+            self.logger.info("Context menu add selected: date=%s", self._selected_date)
             self._add_task()
         elif selected_action == delete_action:
+            current = self.task_list.currentItem()
+            task_id = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
+            self.logger.info("Context menu delete selected: task_id=%s", task_id)
             self._delete_selected_task()
 
     def _add_task_item(self, task: Task, *, read_only: bool = False) -> None:
@@ -250,7 +268,13 @@ class MainWindow(QMainWindow):
         if dialog.exec() != TaskEditDialog.DialogCode.Accepted:
             return
         try:
-            self.task_manager.add_task(dialog.content, self._selected_date)
+            task_id = self.task_manager.add_task(dialog.content, self._selected_date)
+            self.logger.info(
+                "Task added from UI: task_id=%s, date=%s, content_len=%s",
+                task_id,
+                self._selected_date,
+                len(dialog.content),
+            )
             self.refresh_today_view()
         except Exception as exc:
             self.logger.exception("Failed to add task")
@@ -266,6 +290,7 @@ class MainWindow(QMainWindow):
         try:
             self.task_manager.update_task(task_id, content=dialog.content)
             item.setText(dialog.content)
+            self.logger.info("Task edited from UI: task_id=%s, content_len=%s", task_id, len(dialog.content))
         except Exception as exc:
             self.logger.exception("Failed to edit task")
             QMessageBox.critical(self, self.tr("编辑失败"), str(exc))
@@ -284,7 +309,9 @@ class MainWindow(QMainWindow):
         ) != QMessageBox.StandardButton.Yes:
             return
         try:
-            self.task_manager.delete_task(int(item.data(Qt.ItemDataRole.UserRole)))
+            task_id = int(item.data(Qt.ItemDataRole.UserRole))
+            self.task_manager.delete_task(task_id)
+            self.logger.info("Task deleted from UI: task_id=%s", task_id)
             self.refresh_today_view()
         except Exception as exc:
             self.logger.exception("Failed to delete task")
@@ -302,6 +329,12 @@ class MainWindow(QMainWindow):
                 content=content,
                 is_completed=is_completed,
             )
+            self.logger.info(
+                "Task item changed from UI: task_id=%s, completed=%s, content_len=%s",
+                task_id,
+                is_completed,
+                len(content),
+            )
             QTimer.singleShot(0, self._render_selected_date)
         except Exception as exc:
             self.logger.exception("Failed to update task item")
@@ -317,6 +350,7 @@ class MainWindow(QMainWindow):
         ]
         try:
             self.task_manager.reorder_tasks(ids)
+            self.logger.info("Task order persisted from UI: count=%s", len(ids))
         except Exception:
             self.logger.exception("Failed to persist task order")
 
@@ -357,6 +391,7 @@ class MainWindow(QMainWindow):
         )
 
     def _open_settings(self) -> None:
+        self.logger.info("Opening settings dialog")
         dialog = SettingsDialog(self, sync_manager=self.sync_manager)
         dialog.settings_changed.connect(self._apply_settings)
         dialog.exec()
@@ -368,8 +403,14 @@ class MainWindow(QMainWindow):
         app.update_theme_signal(settings.get("theme", "system"))
         if app.change_language(settings.get("language", "zh_CN")):
             self.retranslate_ui()
+        self.logger.info(
+            "Settings applied to main window: theme=%s, language=%s",
+            settings.get("theme", "system"),
+            settings.get("language", "zh_CN"),
+        )
 
     def _on_scheduler_reset(self, date_str: str, inserted: int) -> None:
+        self.logger.info("Scheduler reset signal received: date=%s, inserted=%s", date_str, inserted)
         if date_str == date.today().isoformat():
             self._refresh_available_dates()
             self._select_date(date_str)
@@ -387,10 +428,13 @@ class MainWindow(QMainWindow):
             return
         sync = load_settings().get("sync", {})
         if not sync.get("refresh_token") or not sync.get("initialized"):
+            self.logger.info("Startup sync skipped: logged_in=%s, initialized=%s", bool(sync.get("refresh_token")), bool(sync.get("initialized")))
             return
         try:
+            self.logger.info("Startup sync started")
             result = self.sync_manager.sync("normal")
             self.refresh_current_view()
+            self.logger.info("Startup sync completed: conflicts=%s", len(result.conflicts))
             if result.conflicts and self.tray_icon is not None:
                 self.tray_icon.showMessage(
                     "DailyTodo",
@@ -426,6 +470,7 @@ class MainWindow(QMainWindow):
 
         selected = calendar.selectedDate().toString("yyyy-MM-dd")
         if selected == date.today().isoformat() or selected in self._available_dates:
+            self.logger.info("Date picker accepted: date=%s", selected)
             self._select_date(selected)
 
     def _refresh_available_dates(self) -> None:

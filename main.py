@@ -14,7 +14,8 @@ from core.database import Database
 from core.scheduler import DailyScheduler
 from core.sync_manager import SyncManager, sync_error_message
 from core.task_manager import TaskManager
-from lib.utils import APP_NAME, BASE_DIR, apply_theme, create_app_icon, load_settings, setup_logging
+from lib.logging_utils import load_build_info, log_startup_banner
+from lib.utils import APP_NAME, BASE_DIR, CONFIG_DIR, DATA_DIR, LOG_DIR, apply_theme, create_app_icon, load_settings, setup_logging
 from ui.main_window import MainWindow
 
 
@@ -34,6 +35,7 @@ class SingleInstance:
         socket = QLocalSocket()
         socket.connectToServer(self.key)
         if socket.waitForConnected(300):
+            self.logger.info("Existing DailyTodo instance detected; requesting foreground window")
             socket.write(b"show")
             socket.flush()
             socket.waitForBytesWritten(300)
@@ -111,7 +113,19 @@ def main() -> int:
     setup_logging()
     install_exception_hook()
     logger = logging.getLogger(__name__)
+    bootstrapper = logging.getLogger("Bootstrapper")
+    log_startup_banner(
+        bootstrapper,
+        app_name=APP_NAME,
+        build_info=load_build_info(BASE_DIR),
+        base_dir=BASE_DIR,
+        config_dir=CONFIG_DIR,
+        data_dir=DATA_DIR,
+        log_dir=LOG_DIR,
+        argv=sys.argv,
+    )
 
+    logger.info("Creating QApplication")
     app = DailyTodoApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setWindowIcon(create_app_icon())
@@ -121,36 +135,54 @@ def main() -> int:
     if single_instance.already_running():
         return 0
     single_instance.listen()
+    logger.info("Single-instance server listening: %s", INSTANCE_KEY)
 
     settings = load_settings()
     app.change_language(str(settings.get("language", "zh_CN")))
     apply_theme(app, str(settings.get("theme", "system")))
     app.update_theme_signal(str(settings.get("theme", "system")))
+    logger.info(
+        "Runtime settings applied: language=%s, theme=%s",
+        settings.get("language", "zh_CN"),
+        settings.get("theme", "system"),
+    )
 
     database = Database(Path("data") / "todo.db")
+    logger.info("Initializing database: %s", database.db_path)
     database.initialize()
+    logger.info("Database initialized")
     task_manager = TaskManager(database)
     scheduler = DailyScheduler(task_manager)
     sync_manager = SyncManager(database)
     scheduler.start()
+    logger.info("Daily scheduler started")
 
     window = MainWindow(task_manager, scheduler, sync_manager)
     single_instance.window = window
     window.show()
+    logger.info("Main window shown")
 
     def shutdown() -> None:
         logger.info("Shutting down DailyTodo")
         sync = load_settings().get("sync", {})
         if sync.get("refresh_token") and sync.get("initialized"):
             try:
-                sync_manager.sync("normal")
+                result = sync_manager.sync("normal")
+                logger.info(
+                    "Exit sync completed: message=%s, conflicts=%s",
+                    result.message,
+                    len(result.conflicts),
+                )
             except Exception as exc:
                 logger.info("Exit sync skipped or failed: %s", sync_error_message(exc))
         scheduler.stop()
+        logger.info("Daily scheduler stopped")
         database.close()
+        logger.info("Database closed")
 
     app.aboutToQuit.connect(shutdown)
     exit_code = app.exec()
+    logger.info("DailyTodo GUI exited: code=%s", exit_code)
     return exit_code
 
 

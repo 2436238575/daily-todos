@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from core.sync_manager import SyncManager, sync_error_message
 from lib.utils import load_settings, save_settings, set_auto_start
+from ui.dialogs.about_dialog import AboutDialog
 from ui.dialogs.conflict_dialog import ConflictDialog
 from ui.dialogs.task_edit_dialog import TaskEditDialog
 
@@ -59,6 +60,7 @@ class SettingsDialog(QDialog):
         self.edit_button: QPushButton = self._ui.findChild(QPushButton, "editTemplateButton")
         self.remove_button: QPushButton = self._ui.findChild(QPushButton, "removeTemplateButton")
         self.apply_button: QPushButton = self._ui.findChild(QPushButton, "applyTemplateButton")
+        self.about_button: QPushButton = self._ui.findChild(QPushButton, "aboutButton")
         self.button_box: QDialogButtonBox = self._ui.findChild(QDialogButtonBox, "buttonBox")
 
         self._configure_widgets()
@@ -128,6 +130,7 @@ class SettingsDialog(QDialog):
         self.logout_button.clicked.connect(self._logout_sync)
         self.sync_now_button.clicked.connect(self._run_manual_sync)
         self.conflicts_button.clicked.connect(self._open_conflicts)
+        self.about_button.clicked.connect(self._open_about)
         self.button_box.rejected.connect(self.reject)
 
     def _reload_template_list(self, template: list[dict[str, Any]]) -> None:
@@ -230,6 +233,13 @@ class SettingsDialog(QDialog):
             QMessageBox.critical(self, self.tr("保存失败"), str(exc))
             return
 
+        self.logger.info(
+            "General settings saved: theme=%s, language=%s, reset_time=%s, auto_start=%s",
+            self.settings["theme"],
+            self.settings["language"],
+            self.settings["reset_time"],
+            self.settings["auto_start"],
+        )
         self.settings_changed.emit(dict(self.settings))
 
     def _apply_template(self) -> None:
@@ -244,6 +254,9 @@ class SettingsDialog(QDialog):
         self.settings = load_settings()
         self._reload_template_list(self.settings.get("daily_template", []))
         self._set_template_dirty(False)
+        visible_count = len([item for item in self.settings.get("daily_template", []) if not bool(item.get("deleted", False))])
+        deleted_count = len([item for item in self.settings.get("daily_template", []) if bool(item.get("deleted", False))])
+        self.logger.info("Template saved: visible=%s, deleted=%s", visible_count, deleted_count)
         self.settings_changed.emit(dict(self.settings))
         QMessageBox.information(self, self.tr("提示"), self.tr("母本修改将在下次重置时生效。"))
 
@@ -255,11 +268,21 @@ class SettingsDialog(QDialog):
         self.settings["sync"]["username"] = self.username_edit.text().strip()
         save_settings(self.settings)
         self.settings = load_settings()
+        self.logger.info(
+            "Sync inputs saved: server_url_len=%s, username_len=%s",
+            len(str(self.settings["sync"].get("server_url", ""))),
+            len(str(self.settings["sync"].get("username", ""))),
+        )
 
     def _login_sync(self) -> None:
         if self.sync_manager is None:
             return
         try:
+            self.logger.info(
+                "Sync login requested from settings: server_url_len=%s, username_len=%s",
+                len(self.server_url_edit.text().strip()),
+                len(self.username_edit.text().strip()),
+            )
             result = self.sync_manager.login(
                 self.server_url_edit.text(),
                 self.username_edit.text(),
@@ -270,6 +293,7 @@ class SettingsDialog(QDialog):
             self._update_sync_status(result.message)
             self._update_sync_controls()
             self.settings_changed.emit(dict(self.settings))
+            self.logger.info("Sync login succeeded from settings")
         except Exception as exc:
             self.logger.exception("Sync login failed")
             QMessageBox.critical(self, self.tr("登录失败"), sync_error_message(exc))
@@ -278,11 +302,13 @@ class SettingsDialog(QDialog):
         if self.sync_manager is None:
             return
         try:
+            self.logger.info("Sync logout requested from settings")
             result = self.sync_manager.logout()
             self.settings = load_settings()
             self._update_sync_status(result.message)
             self._update_sync_controls()
             self.settings_changed.emit(dict(self.settings))
+            self.logger.info("Sync logout succeeded from settings")
         except Exception as exc:
             self.logger.exception("Sync logout failed")
             QMessageBox.critical(self, self.tr("退出失败"), sync_error_message(exc))
@@ -296,13 +322,16 @@ class SettingsDialog(QDialog):
             if not bool(self.settings.get("sync", {}).get("initialized", False)):
                 selected = self._choose_initial_sync_mode()
                 if selected is None:
+                    self.logger.info("Manual sync canceled before initial mode selection")
                     return
                 mode = selected
+            self.logger.info("Manual sync requested from settings: mode=%s", mode)
             result = self.sync_manager.sync(mode)
             self.settings = load_settings()
             self._update_sync_status(result.message)
             self._update_sync_controls()
             self.settings_changed.emit(dict(self.settings))
+            self.logger.info("Manual sync succeeded from settings: conflicts=%s", len(result.conflicts))
             if result.conflicts:
                 QMessageBox.information(self, self.tr("同步冲突"), result.message)
                 self._open_conflicts()
@@ -320,17 +349,21 @@ class SettingsDialog(QDialog):
         if not conflicts:
             QMessageBox.information(self, self.tr("同步冲突"), self.tr("当前没有待处理冲突。"))
             self._update_sync_controls()
+            self.logger.info("Conflict dialog skipped: no conflicts")
             return
         dialog = ConflictDialog(conflicts, self)
         dialog.exec()
         if not dialog.resolutions:
+            self.logger.info("Conflict dialog closed without resolutions: conflicts=%s", len(conflicts))
             return
         try:
+            self.logger.info("Conflict resolution requested from settings: count=%s", len(dialog.resolutions))
             result = self.sync_manager.resolve_conflicts(dialog.resolutions)
             self.settings = load_settings()
             self._update_sync_status(result.message)
             self._update_sync_controls()
             self.settings_changed.emit(dict(self.settings))
+            self.logger.info("Conflict resolution succeeded from settings: remaining=%s", len(result.conflicts))
             QMessageBox.information(self, self.tr("同步冲突"), result.message)
         except Exception as exc:
             self.logger.exception("Conflict resolution failed")
@@ -387,6 +420,9 @@ class SettingsDialog(QDialog):
             self.sync_status_label.setText(self.tr("已登录"))
         else:
             self.sync_status_label.setText(self.tr("已登录，尚未首次同步"))
+
+    def _open_about(self) -> None:
+        AboutDialog(self).exec()
 
     @staticmethod
     def _template_meta(item: QListWidgetItem) -> dict[str, Any]:

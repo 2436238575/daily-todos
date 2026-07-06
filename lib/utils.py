@@ -7,13 +7,14 @@ import logging
 import sys
 import uuid
 from copy import deepcopy
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QCoreApplication, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+from lib.logging_utils import configure_logging
 
 
 APP_NAME = "DailyTodo"
@@ -82,29 +83,7 @@ def ensure_runtime_dirs() -> None:
 
 def setup_logging() -> None:
     ensure_runtime_dirs()
-    log_file = LOG_DIR / "app.log"
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-
-    if root.handlers:
-        return
-
-    formatter = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        "%Y-%m-%d %H:%M:%S",
-    )
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=1_048_576,
-        backupCount=5,
-        encoding="utf-8",
-    )
-    file_handler.setFormatter(formatter)
-    root.addHandler(file_handler)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    root.addHandler(console_handler)
+    configure_logging(LOG_DIR / "gui.log")
 
 
 def load_settings() -> dict[str, Any]:
