@@ -35,6 +35,7 @@ from ui.dialogs.task_edit_dialog import TaskEditDialog
 
 class MainWindow(QMainWindow):
     quit_requested = Signal()
+    AUTO_SYNC_DELAY_MS = 2500
 
     def __init__(
         self,
@@ -51,10 +52,14 @@ class MainWindow(QMainWindow):
         self._allow_close = False
         self._refreshing = False
         self._right_button_drag_disabled = False
+        self._auto_sync_in_progress = False
         self._selected_date = date.today().isoformat()
         self._available_dates: set[str] = set()
         self.refresh_action: QAction | None = None
         self.tray_icon = None
+        self._change_sync_timer = QTimer(self)
+        self._change_sync_timer.setSingleShot(True)
+        self._change_sync_timer.timeout.connect(lambda: self._attempt_auto_sync("change"))
 
         self._ui = self._load_ui()
         self.date_label: QLabel = self._ui.findChild(QLabel, "dateLabel")
@@ -135,6 +140,7 @@ class MainWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+        QTimer.singleShot(0, lambda: self._attempt_auto_sync("tray_wake"))
 
     def request_quit(self) -> None:
         self.logger.info("Quit requested from UI")
@@ -276,6 +282,7 @@ class MainWindow(QMainWindow):
                 len(dialog.content),
             )
             self.refresh_today_view()
+            self._schedule_change_sync()
         except Exception as exc:
             self.logger.exception("Failed to add task")
             QMessageBox.critical(self, self.tr("添加失败"), str(exc))
@@ -291,6 +298,7 @@ class MainWindow(QMainWindow):
             self.task_manager.update_task(task_id, content=dialog.content)
             item.setText(dialog.content)
             self.logger.info("Task edited from UI: task_id=%s, content_len=%s", task_id, len(dialog.content))
+            self._schedule_change_sync()
         except Exception as exc:
             self.logger.exception("Failed to edit task")
             QMessageBox.critical(self, self.tr("编辑失败"), str(exc))
@@ -313,6 +321,7 @@ class MainWindow(QMainWindow):
             self.task_manager.delete_task(task_id)
             self.logger.info("Task deleted from UI: task_id=%s", task_id)
             self.refresh_today_view()
+            self._schedule_change_sync()
         except Exception as exc:
             self.logger.exception("Failed to delete task")
             QMessageBox.critical(self, self.tr("删除失败"), str(exc))
@@ -336,6 +345,7 @@ class MainWindow(QMainWindow):
                 len(content),
             )
             QTimer.singleShot(0, self._render_selected_date)
+            self._schedule_change_sync()
         except Exception as exc:
             self.logger.exception("Failed to update task item")
             QMessageBox.critical(self, self.tr("更新失败"), str(exc))
@@ -351,6 +361,7 @@ class MainWindow(QMainWindow):
         try:
             self.task_manager.reorder_tasks(ids)
             self.logger.info("Task order persisted from UI: count=%s", len(ids))
+            self._schedule_change_sync()
         except Exception:
             self.logger.exception("Failed to persist task order")
 
@@ -408,6 +419,8 @@ class MainWindow(QMainWindow):
             settings.get("theme", "system"),
             settings.get("language", "zh_CN"),
         )
+        if self._settings_have_dirty_template(settings):
+            self._schedule_change_sync()
 
     def _on_scheduler_reset(self, date_str: str, inserted: int) -> None:
         self.logger.info("Scheduler reset signal received: date=%s, inserted=%s", date_str, inserted)
@@ -419,29 +432,59 @@ class MainWindow(QMainWindow):
                 "DailyTodo",
                 self.tr("已生成今日任务 {count} 项。").format(count=inserted),
             )
+        if inserted > 0:
+            self._schedule_change_sync()
 
     def _on_scheduler_failed(self, message: str) -> None:
         self.logger.error("Scheduler reset failed: %s", message)
 
     def _attempt_startup_sync(self) -> None:
+        self._attempt_auto_sync("startup")
+
+    def _schedule_change_sync(self) -> None:
+        if self.sync_manager is None:
+            return
+        self.logger.info("Change sync scheduled: delay_ms=%s", self.AUTO_SYNC_DELAY_MS)
+        self._change_sync_timer.start(self.AUTO_SYNC_DELAY_MS)
+
+    def _attempt_auto_sync(self, reason: str) -> None:
         if self.sync_manager is None:
             return
         sync = load_settings().get("sync", {})
         if not sync.get("refresh_token") or not sync.get("initialized"):
-            self.logger.info("Startup sync skipped: logged_in=%s, initialized=%s", bool(sync.get("refresh_token")), bool(sync.get("initialized")))
+            self.logger.info(
+                "Auto sync skipped: reason=%s, logged_in=%s, initialized=%s",
+                reason,
+                bool(sync.get("refresh_token")),
+                bool(sync.get("initialized")),
+            )
             return
+        if self._auto_sync_in_progress:
+            self.logger.info("Auto sync skipped: reason=%s, already in progress", reason)
+            return
+        self._auto_sync_in_progress = True
         try:
-            self.logger.info("Startup sync started")
+            self.logger.info("Auto sync started: reason=%s", reason)
             result = self.sync_manager.sync("normal")
             self.refresh_current_view()
-            self.logger.info("Startup sync completed: conflicts=%s", len(result.conflicts))
+            self.logger.info("Auto sync completed: reason=%s, conflicts=%s", reason, len(result.conflicts))
             if result.conflicts and self.tray_icon is not None:
                 self.tray_icon.showMessage(
                     "DailyTodo",
                     self.tr("同步完成，发现 {count} 个冲突。").format(count=len(result.conflicts)),
                 )
         except Exception as exc:
-            self.logger.info("Startup sync skipped or failed: %s", sync_error_message(exc))
+            self.logger.info("Auto sync skipped or failed: reason=%s, error=%s", reason, sync_error_message(exc))
+        finally:
+            self._auto_sync_in_progress = False
+
+    @staticmethod
+    def _settings_have_dirty_template(settings) -> bool:
+        return any(
+            bool(item.get("sync_dirty", False))
+            for item in settings.get("daily_template", [])
+            if isinstance(item, dict)
+        )
 
     def _open_date_picker(self) -> None:
         self._refresh_available_dates()

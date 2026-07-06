@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -39,6 +40,10 @@ class SyncManager:
         self.logger.info("Sync login started: device=%s, username_len=%s", device_name, len(username))
         bundle = SyncClient(server_url).login(username, password, device_name)
         settings = load_settings()
+        previous_sync = settings.get("sync", {})
+        account_changed = _sync_account_changed(previous_sync, server_url, username)
+        if account_changed:
+            self._reset_local_sync_identity(settings)
         settings["sync"].update(
             {
                 "server_url": server_url,
@@ -48,7 +53,7 @@ class SyncManager:
             }
         )
         save_settings(settings)
-        self.logger.info("Sync login completed: server_version=%s", bundle.server_version)
+        self.logger.info("Sync login completed: server_version=%s, account_changed=%s", bundle.server_version, account_changed)
         return SyncResult("登录成功。", [])
 
     def logout(self) -> SyncResult:
@@ -98,7 +103,18 @@ class SyncManager:
                 len(push_payload["template_items"]),
             )
             if push_payload["tasks"] or push_payload["template_items"]:
-                pushed = client.push(access_token, push_payload)
+                try:
+                    pushed = client.push(access_token, push_payload)
+                except SyncClientError as exc:
+                    if not _is_sync_identity_error(exc):
+                        raise
+                    self.logger.warning("Sync push hit stale local cloud ids; resetting local sync identity and retrying")
+                    self._reset_local_sync_identity(settings)
+                    starting_version = 0
+                    last_version = 0
+                    push_payload = self._build_push_payload(settings)
+                    pushed_payload = push_payload
+                    pushed = client.push(access_token, push_payload)
                 pushed_accepted = list(pushed.get("accepted", []))
                 accepted_items.extend(pushed_accepted)
                 accepted_count += self._apply_accepted(pushed_accepted, settings)
@@ -191,6 +207,22 @@ class SyncManager:
         sync["refresh_token"] = bundle.refresh_token
         save_settings(settings)
         return client, bundle
+
+    def _reset_local_sync_identity(self, settings: dict[str, Any]) -> None:
+        self.database.reset_sync_identity()
+        settings["daily_template"] = _reset_template_sync_identity(settings.get("daily_template", []))
+        sync = settings.get("sync", {})
+        sync.update(
+            {
+                "last_server_version": 0,
+                "initialized": False,
+                "last_sync_at": "",
+            }
+        )
+        settings["sync"] = sync
+        self.last_conflicts = []
+        save_settings(settings)
+        self.logger.info("Local sync identity reset")
 
     def _build_push_payload(self, settings: dict[str, Any]) -> dict[str, Any]:
         tasks = [
@@ -317,3 +349,49 @@ def sync_error_message(exc: Exception) -> str:
     if isinstance(exc, SyncClientError):
         return str(exc)
     return str(exc) or exc.__class__.__name__
+
+
+def _sync_account_changed(previous_sync: dict[str, Any], server_url: str, username: str) -> bool:
+    previous_server = str(previous_sync.get("server_url", "")).strip().rstrip("/")
+    previous_username = str(previous_sync.get("username", "")).strip()
+    has_previous_identity = bool(
+        previous_sync.get("refresh_token")
+        or previous_sync.get("initialized")
+        or int(previous_sync.get("last_server_version", 0) or 0) > 0
+    )
+    if not has_previous_identity:
+        return False
+    return previous_server != server_url.rstrip("/") or previous_username != username
+
+
+def _is_sync_identity_error(exc: SyncClientError) -> bool:
+    message = str(exc)
+    return "HTTP 404" in message and (
+        "template item not found" in message
+        or "task not found" in message
+    )
+
+
+def _reset_template_sync_identity(template: Any) -> list[dict[str, Any]]:
+    if not isinstance(template, list):
+        return []
+    reset: list[dict[str, Any]] = []
+    visible_index = 0
+    for item in template:
+        if not isinstance(item, dict) or bool(item.get("deleted", False)):
+            continue
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        reset.append(
+            {
+                "uid": str(uuid.uuid4()),
+                "content": content,
+                "sort_order": visible_index,
+                "base_version": 0,
+                "deleted": False,
+                "sync_dirty": True,
+            }
+        )
+        visible_index += 1
+    return reset

@@ -49,6 +49,29 @@ class LocalSyncDatabaseTest(unittest.TestCase):
             self.assertEqual(rows[0]["sync_dirty"], 0)
             database.close()
 
+    def test_reset_sync_identity_rekeys_visible_tasks_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            database = Database(Path(temp_dir) / "todo.db")
+            database.initialize()
+            visible_id = database.add_task("visible", "2026-07-05")
+            deleted_id = database.add_task("deleted", "2026-07-05")
+            visible_uid = database.get_tasks_by_date("2026-07-05")[0]["uid"]
+            self.assertTrue(database.delete_task(deleted_id))
+
+            database.mark_task_synced(visible_uid, 12)
+            database.reset_sync_identity()
+
+            visible = database.fetch_one("SELECT uid, base_version, sync_dirty FROM tasks WHERE id = ?", (visible_id,))
+            deleted = database.fetch_one("SELECT base_version, sync_dirty FROM tasks WHERE id = ?", (deleted_id,))
+            self.assertIsNotNone(visible)
+            self.assertIsNotNone(deleted)
+            self.assertNotEqual(visible["uid"], visible_uid)
+            self.assertEqual(visible["base_version"], 0)
+            self.assertEqual(visible["sync_dirty"], 1)
+            self.assertEqual(deleted["base_version"], 0)
+            self.assertEqual(deleted["sync_dirty"], 0)
+            database.close()
+
 
 class TemplateSyncSettingsTest(unittest.TestCase):
     def test_deleted_template_items_do_not_shift_visible_order(self) -> None:

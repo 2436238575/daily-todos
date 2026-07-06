@@ -304,6 +304,31 @@ class Database:
             (version, uid),
         )
 
+    def reset_sync_identity(self) -> None:
+        with self.transaction():
+            rows = self.connection.execute("SELECT id FROM tasks WHERE deleted_at IS NULL").fetchall()
+            for row in rows:
+                self.connection.execute(
+                    """
+                    UPDATE tasks
+                    SET uid = ?,
+                        base_version = 0,
+                        sync_dirty = 1,
+                        last_synced_at = NULL
+                    WHERE id = ?
+                    """,
+                    (str(uuid.uuid4()), row["id"]),
+                )
+            self.connection.execute(
+                """
+                UPDATE tasks
+                SET base_version = 0,
+                    sync_dirty = 0,
+                    last_synced_at = NULL
+                WHERE deleted_at IS NOT NULL
+                """
+            )
+
     def upsert_remote_task(self, payload: dict[str, Any]) -> None:
         deleted_at = datetime.now().isoformat(timespec="seconds") if bool(payload.get("deleted", False)) else None
         existing = self.get_task_by_uid(str(payload["id"]))
