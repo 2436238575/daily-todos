@@ -9,207 +9,297 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>520</width>
-   <height>480</height>
+    <width>720</width>
+    <height>430</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <layout class="QFormLayout" name="formLayout">
-     <item row="0" column="0">
-      <widget class="QLabel" name="themeLabel">
-       <property name="text">
-        <string>主题</string>
-       </property>
-      </widget>
-     </item>
-     <item row="0" column="1">
-      <widget class="QComboBox" name="themeComboBox"/>
-     </item>
-     <item row="1" column="0">
-      <widget class="QLabel" name="languageLabel">
-       <property name="text">
-        <string>语言</string>
-       </property>
-      </widget>
-     </item>
-     <item row="1" column="1">
-      <widget class="QComboBox" name="languageComboBox"/>
-     </item>
-     <item row="2" column="0">
-      <widget class="QLabel" name="resetTimeLabel">
-       <property name="text">
-        <string>重置时间</string>
-       </property>
-      </widget>
-     </item>
-     <item row="2" column="1">
-      <widget class="QTimeEdit" name="resetTimeEdit">
-       <property name="displayFormat">
-        <string>HH:mm</string>
-       </property>
-      </widget>
-     </item>
-     <item row="3" column="0">
-      <widget class="QLabel" name="autoStartLabel">
-       <property name="text">
-        <string>开机自启</string>
-       </property>
-      </widget>
-     </item>
-     <item row="3" column="1">
-      <widget class="QCheckBox" name="autoStartCheckBox">
-       <property name="text">
-        <string>启用</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="syncGroupBox">
-     <property name="title">
-      <string>同步</string>
+    <layout class="QHBoxLayout" name="mainLayout">
+     <item>
+      <widget class="QWidget" name="leftPane">
+     <property name="minimumSize">
+      <size>
+       <width>360</width>
+       <height>0</height>
+      </size>
      </property>
-     <layout class="QVBoxLayout" name="syncGroupLayout">
+     <property name="maximumSize">
+      <size>
+       <width>360</width>
+       <height>16777215</height>
+      </size>
+     </property>
+       <layout class="QVBoxLayout" name="leftLayout">
       <item>
-       <layout class="QFormLayout" name="syncFormLayout">
+       <layout class="QFormLayout" name="formLayout">
         <item row="0" column="0">
-         <widget class="QLabel" name="syncServerUrlLabel">
+         <widget class="QLabel" name="themeLabel">
           <property name="text">
-           <string>服务器地址</string>
+           <string>主题</string>
           </property>
          </widget>
         </item>
         <item row="0" column="1">
-         <widget class="QLineEdit" name="syncServerUrlLineEdit">
-          <property name="placeholderText">
-           <string>http://localhost:8080</string>
-          </property>
-         </widget>
+         <widget class="QComboBox" name="themeComboBox"/>
         </item>
         <item row="1" column="0">
-         <widget class="QLabel" name="syncUsernameLabel">
+         <widget class="QLabel" name="languageLabel">
           <property name="text">
-           <string>用户名</string>
+           <string>语言</string>
           </property>
          </widget>
         </item>
         <item row="1" column="1">
-         <widget class="QLineEdit" name="syncUsernameLineEdit"/>
+         <widget class="QComboBox" name="languageComboBox"/>
         </item>
         <item row="2" column="0">
-         <widget class="QLabel" name="syncPasswordLabel">
+         <widget class="QLabel" name="resetTimeLabel">
           <property name="text">
-           <string>密码</string>
+           <string>重置时间</string>
           </property>
          </widget>
         </item>
         <item row="2" column="1">
-         <widget class="QLineEdit" name="syncPasswordLineEdit"/>
+         <widget class="QTimeEdit" name="resetTimeEdit">
+          <property name="displayFormat">
+           <string>HH:mm</string>
+          </property>
+         </widget>
         </item>
         <item row="3" column="0">
-         <widget class="QLabel" name="syncStatusLabel">
+         <widget class="QLabel" name="autoStartLabel">
           <property name="text">
-           <string>状态</string>
+           <string>开机自启</string>
           </property>
          </widget>
         </item>
         <item row="3" column="1">
-         <widget class="QLabel" name="syncStatusValueLabel">
+         <widget class="QCheckBox" name="autoStartCheckBox">
           <property name="text">
-           <string>未登录</string>
+           <string>启用</string>
           </property>
          </widget>
         </item>
        </layout>
       </item>
       <item>
-       <layout class="QHBoxLayout" name="syncButtonsLayout">
+       <widget class="QGroupBox" name="syncGroupBox">
+        <property name="title">
+         <string>同步</string>
+        </property>
+        <layout class="QVBoxLayout" name="syncGroupLayout">
+         <item>
+          <layout class="QFormLayout" name="syncFormLayout">
+           <item row="0" column="0">
+            <widget class="QLabel" name="syncServerUrlLabel">
+             <property name="text">
+              <string>服务器地址</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QLineEdit" name="syncServerUrlLineEdit">
+             <property name="placeholderText">
+              <string>http://localhost:8080</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLabel" name="syncUsernameLabel">
+             <property name="text">
+              <string>用户名</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QLineEdit" name="syncUsernameLineEdit"/>
+           </item>
+           <item row="2" column="0">
+            <widget class="QLabel" name="syncPasswordLabel">
+             <property name="text">
+              <string>密码</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="1">
+            <widget class="QLineEdit" name="syncPasswordLineEdit"/>
+           </item>
+           <item row="3" column="0">
+            <widget class="QLabel" name="syncStatusLabel">
+             <property name="text">
+              <string>状态</string>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="1">
+            <widget class="QLabel" name="syncStatusValueLabel">
+             <property name="text">
+              <string>未登录</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QGridLayout" name="syncButtonsLayout">
+           <item row="0" column="0">
+            <widget class="QPushButton" name="syncLoginButton">
+             <property name="text">
+              <string>登录</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QPushButton" name="syncLogoutButton">
+             <property name="text">
+              <string>退出登录</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="2">
+            <widget class="QPushButton" name="syncNowButton">
+             <property name="text">
+              <string>立即同步</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="3">
+            <widget class="QPushButton" name="syncConflictsButton">
+             <property name="text">
+              <string>冲突中心</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </widget>
+      </item>
+      <item>
+       <spacer name="leftSpacer">
+        <property name="orientation">
+         <enum>Qt::Vertical</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>20</width>
+          <height>40</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+       </layout>
+      </widget>
+     </item>
+     <item>
+      <widget class="QWidget" name="templatePane">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>1</horstretch>
+       <verstretch>1</verstretch>
+      </sizepolicy>
+     </property>
+       <layout class="QVBoxLayout" name="templateLayout">
+      <item>
+       <widget class="QLabel" name="templateLabel">
+        <property name="text">
+         <string>每日任务母本</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QListWidget" name="templateListWidget">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>1</horstretch>
+          <verstretch>1</verstretch>
+         </sizepolicy>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="templateButtonsLayout">
         <item>
-         <widget class="QPushButton" name="syncLoginButton">
+         <widget class="QPushButton" name="addTemplateButton">
           <property name="text">
-           <string>登录</string>
+           <string>添加</string>
           </property>
          </widget>
         </item>
         <item>
-         <widget class="QPushButton" name="syncLogoutButton">
+         <widget class="QPushButton" name="editTemplateButton">
           <property name="text">
-           <string>退出登录</string>
+           <string>编辑</string>
           </property>
          </widget>
         </item>
         <item>
-         <widget class="QPushButton" name="syncNowButton">
+         <widget class="QPushButton" name="removeTemplateButton">
           <property name="text">
-           <string>立即同步</string>
+           <string>删除</string>
           </property>
          </widget>
         </item>
         <item>
-         <widget class="QPushButton" name="syncConflictsButton">
+         <widget class="QPushButton" name="applyTemplateButton">
           <property name="text">
-           <string>冲突中心</string>
+           <string>应用</string>
           </property>
          </widget>
         </item>
        </layout>
       </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QLabel" name="templateLabel">
-     <property name="text">
-      <string>每日任务母本</string>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <widget class="QListWidget" name="templateListWidget"/>
-   </item>
-   <item>
-    <layout class="QHBoxLayout" name="templateButtonsLayout">
-     <item>
-      <widget class="QPushButton" name="addTemplateButton">
-       <property name="text">
-        <string>添加</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="editTemplateButton">
-       <property name="text">
-        <string>编辑</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="removeTemplateButton">
-       <property name="text">
-        <string>删除</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="applyTemplateButton">
-       <property name="text">
-        <string>应用</string>
-       </property>
+       </layout>
       </widget>
      </item>
     </layout>
    </item>
    <item>
-    <widget class="QDialogButtonBox" name="buttonBox">
-     <property name="orientation">
-      <enum>Qt::Horizontal</enum>
-     </property>
-     <property name="standardButtons">
-      <set>QDialogButtonBox::Close</set>
-     </property>
-    </widget>
+    <layout class="QHBoxLayout" name="dialogButtonsLayout">
+     <item>
+      <spacer name="dialogButtonsSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="aboutButton">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="text">
+        <string>关于</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QDialogButtonBox" name="buttonBox">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="standardButtons">
+        <set>QDialogButtonBox::Close</set>
+       </property>
+      </widget>
+     </item>
+    </layout>
    </item>
   </layout>
  </widget>
