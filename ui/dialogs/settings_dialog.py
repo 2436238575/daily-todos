@@ -4,31 +4,57 @@ from __future__ import annotations
 
 import logging
 import uuid
+from html import escape
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QFile, QSignalBlocker, Qt, QTime, Signal
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QTextEdit,
     QTimeEdit,
     QVBoxLayout,
 )
 
-from core.sync_manager import SyncManager, sync_error_message
+from core.sync_manager import SyncManager, SyncResult, sync_error_message
 from lib.utils import load_settings, save_settings, set_auto_start
 from ui.dialogs.about_dialog import AboutDialog
 from ui.dialogs.conflict_dialog import ConflictDialog
 from ui.dialogs.task_edit_dialog import TaskEditDialog
+
+
+ADDITION_COLOR = "#22863a"
+DELETION_COLOR = "#cb2431"
+
+
+def _parse_diff_summary(summary: str) -> tuple[int, int]:
+    additions = 0
+    deletions = 0
+    for part in summary.split():
+        if part.startswith("+"):
+            additions = _parse_count(part[1:])
+        elif part.startswith("-"):
+            deletions = _parse_count(part[1:])
+    return additions, deletions
+
+
+def _parse_count(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError:
+        return 0
 
 
 class SettingsDialog(QDialog):
@@ -328,19 +354,88 @@ class SettingsDialog(QDialog):
             self.logger.info("Manual sync requested from settings: mode=%s", mode)
             result = self.sync_manager.sync(mode)
             self.settings = load_settings()
-            self._update_sync_status(result.message)
+            self._update_sync_status(result.message.splitlines()[0])
             self._update_sync_controls()
             self.settings_changed.emit(dict(self.settings))
             self.logger.info("Manual sync succeeded from settings: conflicts=%s", len(result.conflicts))
             if result.conflicts:
-                QMessageBox.information(self, self.tr("同步冲突"), result.message)
+                self._show_sync_result(self.tr("同步冲突"), result)
                 self._open_conflicts()
             else:
-                QMessageBox.information(self, self.tr("同步完成"), result.message)
+                self._show_sync_result(self.tr("同步完成"), result)
         except Exception as exc:
             self.logger.exception("Manual sync failed")
             self._update_sync_status(self.tr("同步失败"))
             QMessageBox.critical(self, self.tr("同步失败"), sync_error_message(exc))
+
+    def _show_sync_result(self, title: str, result: SyncResult) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        layout = QVBoxLayout(dialog)
+
+        message = QLabel(dialog)
+        message.setTextFormat(Qt.TextFormat.RichText)
+        message.setText(self._sync_result_html(result))
+        layout.addWidget(message)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch(1)
+        diff_button = QPushButton(self.tr("Diff"), dialog)
+        ok_button = QPushButton(self.tr("OK"), dialog)
+        ok_button.setDefault(True)
+        button_layout.addWidget(diff_button)
+        button_layout.addWidget(ok_button)
+        layout.addLayout(button_layout)
+
+        diff_button.clicked.connect(lambda: self._show_sync_diff(result.diff_lines))
+        ok_button.clicked.connect(dialog.accept)
+        dialog.exec()
+
+    def _show_sync_diff(self, lines: list[str]) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.tr("同步 Diff"))
+        layout = QVBoxLayout(dialog)
+
+        diff_view = QTextEdit(dialog)
+        diff_view.setReadOnly(True)
+        diff_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        diff_view.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        diff_view.setHtml(self._sync_diff_html(lines))
+        layout.addWidget(diff_view)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.resize(640, 360)
+        dialog.exec()
+
+    def _sync_result_html(self, result: SyncResult) -> str:
+        lines = result.message.splitlines()
+        header = escape(lines[0] if lines else self.tr("同步完成"))
+        summary = lines[1] if len(lines) > 1 else "+0 -0"
+        additions, deletions = _parse_diff_summary(summary)
+        return (
+            f"<p>{header}</p>"
+            f"<p style='font-family: monospace; font-size: 18px;'>"
+            f"<span style='color: {ADDITION_COLOR}; font-weight: 600;'>+{additions}</span>"
+            f"&nbsp;&nbsp;"
+            f"<span style='color: {DELETION_COLOR}; font-weight: 600;'>-{deletions}</span>"
+            f"</p>"
+        )
+
+    def _sync_diff_html(self, lines: list[str]) -> str:
+        if not lines:
+            return f"<pre>{escape(self.tr('没有变更。'))}</pre>"
+        html_lines = []
+        for line in lines:
+            color = ADDITION_COLOR if line.startswith("+") else DELETION_COLOR if line.startswith("-") else "inherit"
+            html_lines.append(f"<span style='color: {color};'>{escape(line)}</span>")
+        return (
+            "<pre style='font-family: monospace; white-space: pre; margin: 0;'>"
+            + "<br>".join(html_lines)
+            + "</pre>"
+        )
 
     def _open_conflicts(self) -> None:
         if self.sync_manager is None:

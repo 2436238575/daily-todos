@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
 from core.database import Database
 from core.sync_client import SyncClient, SyncClientError, TokenBundle
+from core.sync_utils import dedupe_resolutions, merge_conflicts, sync_change_lines, sync_summary_message
 from lib.utils import load_settings, save_settings
 
 
@@ -19,6 +20,7 @@ SyncMode = Literal["upload", "download", "merge", "normal"]
 class SyncResult:
     message: str
     conflicts: list[dict[str, Any]]
+    diff_lines: list[str] = field(default_factory=list)
 
 
 class SyncManager:
@@ -75,6 +77,9 @@ class SyncManager:
         last_version = starting_version
 
         accepted_count = 0
+        accepted_items: list[dict[str, Any]] = []
+        pushed_payload: dict[str, list[dict[str, Any]]] = {"tasks": [], "template_items": []}
+        pulled: dict[str, Any] = {}
         conflicts: list[dict[str, Any]] = []
         self.logger.info("Sync started: mode=%s, starting_version=%s", mode, starting_version)
 
@@ -86,6 +91,7 @@ class SyncManager:
             self.logger.info("Sync download mode prepared local snapshot replacement")
         else:
             push_payload = self._build_push_payload(settings)
+            pushed_payload = push_payload
             self.logger.info(
                 "Sync push payload built: tasks=%s, template_items=%s",
                 len(push_payload["tasks"]),
@@ -93,8 +99,10 @@ class SyncManager:
             )
             if push_payload["tasks"] or push_payload["template_items"]:
                 pushed = client.push(access_token, push_payload)
-                accepted_count += self._apply_accepted(pushed.get("accepted", []), settings)
-                conflicts.extend(list(pushed.get("conflicts", [])))
+                pushed_accepted = list(pushed.get("accepted", []))
+                accepted_items.extend(pushed_accepted)
+                accepted_count += self._apply_accepted(pushed_accepted, settings)
+                conflicts = merge_conflicts(conflicts, list(pushed.get("conflicts", [])))
                 last_version = max(last_version, int(pushed.get("server_version", last_version)))
                 self.logger.info(
                     "Sync push completed: accepted=%s, conflicts=%s, server_version=%s",
@@ -105,7 +113,7 @@ class SyncManager:
             pull_since = 0 if mode in {"upload", "merge"} and not sync.get("initialized") else starting_version
 
         pulled = client.pull(access_token, pull_since)
-        conflicts.extend(list(pulled.get("conflicts", [])))
+        conflicts = merge_conflicts(conflicts, list(pulled.get("conflicts", [])))
         self._apply_pull(pulled, settings, conflicts)
         last_version = int(pulled.get("server_version", last_version))
         self.logger.info(
@@ -127,13 +135,21 @@ class SyncManager:
         )
         save_settings(settings)
         self.last_conflicts = conflicts
+        diff_lines = sync_change_lines(
+            accepted=accepted_items,
+            pushed=pushed_payload,
+            pulled=pulled,
+            conflicts=conflicts,
+        )
+        message = sync_summary_message(diff_lines, len(conflicts))
         if conflicts:
             self.logger.info("Sync completed with conflicts: conflicts=%s", len(conflicts))
-            return SyncResult(f"同步完成，发现 {len(conflicts)} 个冲突。", conflicts)
+            return SyncResult(message, conflicts, diff_lines)
         self.logger.info("Sync completed: accepted=%s", accepted_count)
-        return SyncResult(f"同步完成，已上传 {accepted_count} 项变更。", [])
+        return SyncResult(message, [], diff_lines)
 
     def resolve_conflicts(self, resolutions: list[dict[str, Any]]) -> SyncResult:
+        resolutions = dedupe_resolutions(resolutions)
         if not resolutions:
             return SyncResult("没有需要解决的冲突。", [])
         self.logger.info("Conflict resolution started: count=%s", len(resolutions))

@@ -5,6 +5,14 @@ import unittest
 from pathlib import Path
 
 from core.database import Database
+from core.sync_utils import (
+    dedupe_resolutions,
+    merge_conflicts,
+    sync_change_counts,
+    sync_change_lines,
+    sync_summary_message,
+)
+
 
 class LocalSyncDatabaseTest(unittest.TestCase):
     def test_task_sync_fields_and_soft_delete(self) -> None:
@@ -61,6 +69,71 @@ class TemplateSyncSettingsTest(unittest.TestCase):
 
         visible = [item for item in template if not item["deleted"]]
         self.assertEqual([item["sort_order"] for item in visible], [0, 1])
+
+
+class SyncConflictDedupeTest(unittest.TestCase):
+    def test_merge_conflicts_keeps_unique_ids(self) -> None:
+        push_conflict = {"id": "conflict-1", "entity_id": "task-1"}
+        pull_conflict = {"id": "conflict-1", "entity_id": "task-1"}
+        other_conflict = {"id": "conflict-2", "entity_id": "task-2"}
+
+        merged = merge_conflicts([push_conflict], [pull_conflict, other_conflict])
+
+        self.assertEqual([item["id"] for item in merged], ["conflict-1", "conflict-2"])
+        self.assertIs(merged[0], push_conflict)
+
+    def test_dedupe_resolutions_keeps_first_choice(self) -> None:
+        resolutions = [
+            {"conflict_id": "conflict-1", "choice": "local"},
+            {"conflict_id": "conflict-1", "choice": "remote"},
+            {"conflict_id": "conflict-2", "choice": "remote"},
+        ]
+
+        deduped = dedupe_resolutions(resolutions)
+
+        self.assertEqual(
+            deduped,
+            [
+                {"conflict_id": "conflict-1", "choice": "local"},
+                {"conflict_id": "conflict-2", "choice": "remote"},
+            ],
+        )
+
+    def test_sync_change_lines_mark_upload_download_and_delete(self) -> None:
+        lines = sync_change_lines(
+            accepted=[
+                {"entity_type": "task", "entity_id": "local-task", "version": 2},
+                {"entity_type": "template_item", "entity_id": "deleted-template", "version": 3},
+            ],
+            pushed={
+                "tasks": [{"id": "local-task", "content": "local edit", "deleted": False}],
+                "template_items": [{"id": "deleted-template", "content": "old template", "deleted": True}],
+            },
+            pulled={
+                "tasks": [
+                    {"id": "local-task", "content": "local edit", "deleted": False},
+                    {"id": "remote-task", "content": "remote edit", "deleted": False},
+                ],
+                "template_items": [{"id": "remote-delete", "content": "remote old", "deleted": True}],
+            },
+            conflicts=[],
+        )
+
+        self.assertEqual(
+            lines,
+            [
+                "+ 上传任务: local edit",
+                "- 上传母本: old template",
+                "+ 下载任务: remote edit",
+                "- 下载母本: remote old",
+            ],
+        )
+        self.assertEqual(sync_change_counts(lines), (2, 2))
+
+    def test_sync_summary_message_shows_only_counts(self) -> None:
+        message = sync_summary_message(["+ 上传任务: a", "+ 上传任务: b", "- 下载任务: c"])
+
+        self.assertEqual(message, "同步完成\n+2 -1")
 
 
 if __name__ == "__main__":
